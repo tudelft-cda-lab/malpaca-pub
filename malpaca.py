@@ -1,8 +1,10 @@
 #!/usr/bin/python3
 
-import sys, dpkt, datetime, glob, os, operator, subprocess
+import sys, dpkt, datetime, glob, os, operator, subprocess, csv
 import socket
 import matplotlib
+from collections import deque
+from itertools import permutations
 from dtw import dtw
 from fastdtw import fastdtw
 from math import log
@@ -27,6 +29,9 @@ import itertools
 from sklearn.metrics.pairwise import euclidean_distances, manhattan_distances
 import hdbscan
 import time
+
+def difference(str1, str2):
+    return sum([str1[x]!=str2[x] for x in range(len(str1))])
 
 totalconn = 0
 
@@ -533,18 +538,138 @@ def connlevel_sequence(metadata, mapping):
 
     csv_file = 'clusters'+addition+'.csv'
     outfile = open(csv_file, 'w')
-    outfile.write("clusnum,connnum,prob,srcip,dstip\n")
+    outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
 
 
     for n,clus in final_clusters.items():
         #print "cluster numbeR: " + str(n)
      
         for idx,el in  enumerate([inv_mapping[x] for x in clus]):
-   
+            print(el)
             ip = el.split('->')
+            if '-' in ip[0]:
+                classname = el.split('-')[0]
+            else: 
+                classname = el.split('.pcap')[0]
+            
+            filename = el.split('.pcap')[0]
             #print(str(n)+","+ip[0]+","+ip[1]+","+str(final_probs[n][idx])+","+str(mapping[el])+"\n")
-            outfile.write(str(n)+","+str(mapping[el])+","+str(final_probs[n][idx])+","+ip[0]+","+ip[1]+"\n")
+            outfile.write(str(n)+","+str(mapping[el])+","+str(final_probs[n][idx])+","+str(classname)+","+str(filename)+","+ip[0]+","+ip[1]+"\n")
     outfile.close()
+    # Making tree
+    print('Producing DAG with relationships between pcaps')
+    clusters = {}
+    numclus = len(set(clu.labels_))
+    with open(csv_file, 'r') as f1:
+        reader = csv.reader(f1, delimiter = ',')
+        for i,line in enumerate(reader):#f1.readlines()[1:]:
+            if i > 0:
+                if line[4] not in clusters.keys():
+                    clusters[line[4]] = []
+                clusters[line[4]].append((line[3],line[0])) # classname, cluster#
+    print(clusters)
+    f1.close()
+    array = [str(x) for x in range(numclus-1)]
+    array.append("-1")
+    treeprep = dict()
+    for filename,val in clusters.items():
+        for fam, clus in val:
+
+            arr = [0]*numclus
+          
+            ind = array.index(clus)
+            
+            arr[ind] = 1
+            
+            mas = ''.join([str(x) for x in arr[:-1]])
+            famname = fam 
+            print(filename + "\t"+ fam+"\t"+''.join([str(x) for x in arr[:-1]]))
+            if mas not in treeprep.keys():
+                treeprep[mas] = dict()
+            if famname not in treeprep[mas].keys():
+                treeprep[mas][famname] = set()
+            treeprep[mas][famname].add(str(filename))
+
+    f2 = open('mas-details'+addition+'.csv', 'w')
+    for k,v in treeprep.items():
+        for kv,vv in v.items():
+            print(k, str(kv), (vv))
+            f2.write(str(k)+';'+str(kv)+';'+str(len(vv))+'\n')
+    f2.close()
+
+    with open('mas-details'+addition+'.csv', 'rU') as f3:
+        csv_reader = csv.reader(f3, delimiter=';')
+
+        graph = {}
+        names ={}
+        for line in csv_reader:
+            graph[line[0]] = []
+            if line[0] not in names.keys():
+                names[line[0]] = []
+            names[line[0]].append(line[1]+"("+line[2]+")")
+
+        ulist = graph.keys()
+        print(len(ulist))
+        covered = set()
+        next = deque()
+
+        zeros = ''.join(['0']*(numclus-1))
+
+        next.append(zeros)
+        while(len(next)>0):
+            l1 = next.popleft()
+            covered.add(l1)
+            for l2 in ulist:
+                if l2 not in covered and difference(l1,l2) == 1:
+                    graph[l1].append(l2)
+                    if l2 not in next:
+                        next.append(l2)
+        #_keys = graph.keys()
+        val = []
+        for v in graph.values():
+            val.extend(v)
+        specials  = []
+        for u in ulist:
+
+            if u not in val and u != zeros:
+                graph[zeros].append(u)
+                specials.append(u)
+        f2 = open('relation-tree'+addition+'.dot', 'w')
+        f2.write("digraph dag {\n")
+        f2.write("rankdir=LR;\n")
+        num = 0
+        for idx,li in names.items():
+            text = ''
+            #print(idx)
+            name = str(idx)+'\n'
+            
+            for l in li:
+                name+=l+',\n'
+            #print(str(idx) + " [label=\""+str(num)+"\"]")
+            if idx not in specials:
+                print(str(idx) + " [label=\""+name+"\"]")
+                text = str(idx) + " [label=\""+name+"\" , shape=box;]"
+            else:
+                print(str(idx) + " [style=\"filled\" fillcolor=\"red\" label=\""+name+"\"]")
+                text = str(idx) + " [style=\"filled\" shape=box, fillcolor=\"red\" label=\""+name+"\"]"
+
+            f2.write(text)
+            f2.write('\n')
+        for k,v in graph.items():
+            for vi in v:
+                f2.write(str(k)+"->"+str(vi))
+                f2.write('\n')
+                print(k+"->"+vi)
+        f2.write("}")
+        f2.close()
+    # Rendering DAG
+    print('Rendering DAG -- needs graphviz dot')
+    try:
+        os.system('dot -Tpng relation-tree'+addition+'.dot -o DAG'+addition+'.png')
+        print('Done')
+    except:
+        print('Failed')
+        pass
 
 
     # temporal heatmaps start
