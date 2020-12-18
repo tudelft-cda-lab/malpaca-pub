@@ -89,16 +89,16 @@ def connlevel_sequence(metadata, mapping):
     addition_past = '-'+past_exp
     
     # ---- Reloading old traces ---- #
-    filename = 'bytes'+addition_past+'.txt'
+    filename = 'bytes-features'+addition_past
     dataB = readdatafile(filename)
     print( "loaded bytes data")
-    filename = 'gaps'+addition_past+'.txt'
+    filename = 'gaps-features'+addition_past
     dataG = readdatafile(filename)
     print( "loaded gaps data")
-    filename = 'sport'+addition_past+'.txt'
+    filename = 'sport-features'+addition_past
     dataS = readdatafile(filename)
     print( "loaded sport data")
-    filename = 'dport'+addition_past+'.txt'
+    filename = 'dport-features'+addition_past
     dataD = readdatafile(filename)
     print( "loaded dport data")
     
@@ -145,7 +145,7 @@ def connlevel_sequence(metadata, mapping):
     print('reloaded clustering model')
     
     sys.exit()
-    clu.predict(new samples)
+    clu.predict()
 
     print( "num clusters: " + str(len(set(clu.labels_))-1))
 
