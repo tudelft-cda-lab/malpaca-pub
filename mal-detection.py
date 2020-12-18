@@ -38,12 +38,12 @@ def difference(str1, str2):
 totalconn = 0
 
 expname = 'exp'
-if len(sys.argv) > 3:
-    expname = sys.argv[3]
+if len(sys.argv) > 4:
+    expname = sys.argv[4]
 
 thresh = 20
-if len(sys.argv) > 4:
-    thresh = int(sys.argv[4])
+if len(sys.argv) > 5:
+    thresh = int(sys.argv[5])
 
 
 
@@ -133,7 +133,7 @@ def connlevel_sequence(metadata, mapping):
     #print distm
     print( "found sport.txt")
 
-        
+
     ndistmS = copy.deepcopy(distm)
 
 
@@ -196,7 +196,7 @@ def connlevel_sequence(metadata, mapping):
 
 
 
-    clu = joblib.load('model.pkl')
+    clu = joblib.load(sys.argv[1]) 
 
     print( "num clusters: " + str(len(set(clu.labels_))-1))
 
@@ -630,7 +630,7 @@ def readfolder():
     fno = 0
     meta = {}
     mapping= {}
-    files = glob.glob(sys.argv[2]+"/*.pcap")
+    files = glob.glob(sys.argv[3]+"/*.pcap")
     print('About to read pcap...')
     for f in files:
         key = os.path.basename(f)#[:-5].split('-')
@@ -662,7 +662,7 @@ def readfile():
     startf = time.time()
     mapping= {}
     print('About to read pcap...')
-    data, connections = readpcap(sys.argv[2])
+    data, connections = readpcap(sys.argv[3])
     print('Done reading pcaps...')
     if len(connections.items()) < 1:
         return
@@ -695,9 +695,9 @@ def readfile():
     endc = time.time()
     print('Total time ', (endc-startc))
 
-if sys.argv[1] == 'file':
+if sys.argv[2] == 'file':
     readfile()
-elif sys.argv[1] == 'folder':
+elif sys.argv[2] == 'folder':
     readfolder()
 else:
     print('incomplete command')
