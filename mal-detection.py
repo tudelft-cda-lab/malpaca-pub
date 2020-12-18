@@ -300,10 +300,10 @@ def connlevel_sequence(metadata, mapping):
     # Making a new composite dist matrix
     ndistm = []
 
-    for a in range(len(distG)):#len(data.values())): #range(10):
+    for a in range(len(distS)):#len(data.values())): #range(10):
         ndistm.append([])
-        for b in range(len(distG)):
-            ndistm[a].append((ndistmB[a][b]+ndistmG[a][b]+distD[a][b]+distS[a][b])/4.0)
+        for b in range(len(distS)):
+            ndistm[a].append((ndistmB[a][b]+ndistmG[a][b]+distD[a][b]+distS[a][b])/4.0)  
        
     plot_kwds = {'alpha': 0.5, 's' : 80, 'linewidths': 0}
     RS=3072018
@@ -311,22 +311,25 @@ def connlevel_sequence(metadata, mapping):
     plt.scatter(*projection.T)
     for i,_ in enumerate(ndistm):#mapping.keys()): #zip([x[:1] for x in mapping.keys()],clu.labels_)):
         if i >= len(dataB):
-            txt = 'new'#keys[i-len(dataB)]
-            plt.annotate('new', (projection.T[0][i],projection.T[1][i]), color='r', alpha=0.6)
+            txt = '*'#keys[i-len(dataB)]
+            plt.scatter(projection.T[0][i],projection.T[1][i], color='r', alpha=0.6)
+            plt.annotate(txt, (projection.T[0][i],projection.T[1][i]), color='r', alpha=0.6)
 
-    #plt.savefig("tsne-result"+addition)
-    plt.show()
-
-    model = joblib.load(sys.argv[1])
+    plt.savefig("tsne-result"+addition)
+    #plt.show()
+    size = 7
+    sample= 7
+    model = hdbscan.HDBSCAN(min_cluster_size = size,  min_samples = sample, cluster_selection_method='leaf', metric='precomputed')
+    clu = model.fit(np.array([np.array(x) for x in ndistm])) #joblib.load(sys.argv[1])
 
     print('reloaded clustering model')
-    print('New points to be clustered', len(dataB)-len(ndistm))
+    print('New points to be clustered', len(ndistm)-len(dataB))
     
-    for i in range(len(dataB)-len(ndistm)):
-        clu = model.predict(np.array(ndistm[i]))
-        print('assigned to', clu)
+    #for i in range(len(dataB),len(ndistm)):
+    #    clu = model.predict(np.array(ndistm[i]))
+    #    print('assigned to', clu)
     #print( "num clusters: " + str(len(set(clu.labels_))-1))
-
+    
     #avg = 0.0
     #for l in list(set(clu.labels_)):
     #    if l !=-1:
@@ -352,19 +355,48 @@ def connlevel_sequence(metadata, mapping):
     mem_col = [sns.desaturate(x,p) for x,p in zip(col,clu.probabilities_)]
 
     plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.2)
+    
+    maslist = dict()
+    numclus = len(set(clu.labels_))
+    array = [str(x) for x in range(numclus-1)]
+    array.append("-1")
+    fig = plt.figure()
     for i,txt in enumerate(clu.labels_):#mapping.keys()): #zip([x[:1] for x in mapping.keys()],clu.labels_)):
         #if txt == -1:
         #   continue
         plt.scatter(projection.T[0][i],projection.T[1][i], color=col[i], alpha=0.6)
-        plt.annotate(txt, (projection.T[0][i],projection.T[1][i]), color=col[i], alpha=0.6)
+        if i >= len(dataB):
+            #print(keys[len(dataB)-i], 'assigned to cluster', txt)
+            el = keys[len(dataB)-i]
+            #ip = el.split('->')
+            #if '-' in ip[0]:
+            #    classname = el.split('-')[0]
+            #else:
+            #    classname = el.split('.pcap')[0]
+
+            filename = el.split('.pcap')[0]
+            if filename not in maslist.keys():
+                maslist[filename] = [0]*numclus
+            ind = array.index(str(txt))
+            maslist[filename][ind] = 1
+            
+            #print(classname, filename, maslist)
+            plt.annotate(txt, (projection.T[0][i],projection.T[1][i]), color=col[i], alpha=0.6)
+        #else:
+            #plt.annotate(txt, (projection.T[0][i],projection.T[1][i]), color=col[i], alpha=0.6)
 
     plt.savefig("clustering-result"+addition)
     #plt.show()
 
-
-
+    print('---------')
+    print('Cluster Membership Strings')
+    for name, mas in maslist.items():
+        ms = ''.join([str(x) for x in mas[:-1]])
+        print(name, ms)
+    print('---------')
+    
     # writing csv file
-    print("writing csv file")
+    '''print("writing csv file")
     final_clusters = {}
     final_probs = {}
     for lab in set(clu.labels_):
@@ -556,7 +588,7 @@ def connlevel_sequence(metadata, mapping):
             print('Done')
         except:
             print('Failed')
-            pass
+            pass'''
 
 
     # temporal heatmaps start
