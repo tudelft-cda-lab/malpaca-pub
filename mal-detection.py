@@ -45,10 +45,10 @@ thresh = 20
 if len(sys.argv) > 5:
     thresh = int(sys.argv[5])
 
-def computeDTW(old_data, new_data, old_dist, f, thresh):
-    print("starting dist computation")
-    #distm = [-1] * len(old_data)
-    #distm = [[-1]*len(new_data) for i in distm]
+
+def computeDTW(old_data, new_data, f, thresh):
+    print("starting dtw dist computation")
+    
     new_dist = dict()
     print(len(old_data), len(new_data))
     for a in range(len(new_data)):
@@ -74,6 +74,45 @@ def computeDTW(old_data, new_data, old_dist, f, thresh):
                 new_new_dist[a] = dict()
             if b not in new_new_dist[a].keys():
                 new_new_dist[a][b] = dist
+    return (new_dist, new_new_dist)
+    
+def computeNgram(old_data, new_data, f, thresh):
+    print("starting ngram dist computation")
+    
+    new_dist = dict()
+    print(len(old_data), len(new_data))
+    for a in range(len(new_data)):
+        for b in range(len(old_data)):
+            i = [x[f] for x in new_data[a]][:thresh]
+            j = old_data[b][:thresh]
+            if len(i) == 0 or len(j) == 0: continue             
+            dist,_= fastdtw(i,j,dist=euclidean)
+            if a not in new_dist.keys():
+                new_dist[a] = dict()
+            if b not in new_dist[a].keys():
+                new_dist[a][b] = dist
+                
+    new_new_dist = dict()
+    print(len(old_data), len(new_data))
+    for a in range(len(new_data)):
+        for b in range(len(new_data)):
+            i = [x[f] for x in new_data[a]][:thresh]
+            j = [x[f] for x in new_data[b]][:thresh]
+            if len(i) == 0 or len(j) == 0: continue             
+            dist,_= fastdtw(i,j,dist=euclidean)
+            if a not in new_new_dist.keys():
+                new_new_dist[a] = dict()
+            if b not in new_new_dist[a].keys():
+                new_new_dist[a][b] = dist
+    return (new_dist, new_new_dist)
+
+def compositeDist(old_data, new_data, old_dist, f, thresh, method):
+    
+    new_dist, new_new_dist = None, None
+    if method == 'DTW': 
+        new_dist, new_new_dist  = computeDTW(old_data, new_data, f, thresh)
+    else 
+        new_dist, new_new_dist  = computeNgram(old_data, new_data, f, thresh)
         
     # make a full dist matrix
     comp = []
@@ -96,6 +135,9 @@ def computeDTW(old_data, new_data, old_dist, f, thresh):
         comp.append(c)
     
     return comp
+
+
+
 
 
 def readdatafile(filename):
@@ -193,8 +235,10 @@ def connlevel_sequence(metadata, mapping):
     # plot new points here
     #old_data, new_data, old_dist, f, thresh
     # old_data, new_data, thresh
-    distB = computeDTW(dataB, values, ndistmB, 1 , thresh)
-    distG = computeDTW(dataG, values, ndistmG, 0 , thresh)
+    distB = compositeDist(dataB, values, ndistmB, 1 , thresh, 'DTW')
+    distG = compositeDist(dataG, values, ndistmG, 0 , thresh, 'DTW')
+    distS = compositeDist(dataS, values, ndistmS, 2 , thresh, 'Ngram')
+    distD = compositeDist(dataD, values, ndistmD, 3 , thresh, 'Ngram')
     
     
     plt.savefig("tsne-result"+addition)
