@@ -148,7 +148,7 @@ def compositeDist(old_data, new_data, old_dist, f, thresh, method):
     new_dist, new_new_dist = None, None
     if method == 'DTW': 
         new_dist, new_new_dist  = computeDTW(old_data, new_data, f, thresh)
-    else:
+    elif method== 'Ngram':
         new_dist, new_new_dist  = computeNgram(old_data, new_data, f, thresh)
         
     # make a full dist matrix
@@ -168,7 +168,7 @@ def compositeDist(old_data, new_data, old_dist, f, thresh, method):
                 #print('-- ', new_dist[i-len(old_data)][j])
             else:
                 c.append(new_new_dist[j-len(old_data)][i-len(old_data)])
-        print(c)
+        #print(c)
         comp.append(c)
     
     return comp
@@ -264,10 +264,7 @@ def connlevel_sequence(metadata, mapping):
     print(len(labels))
     #print "effective number of connections: " + str(len(dist))
 
-    plot_kwds = {'alpha': 0.5, 's' : 80, 'linewidths': 0}
-    RS=3072018
-    projection = TSNE(random_state=RS).fit_transform(ndistm)
-    plt.scatter(*projection.T)
+    
     
     # plot new points here
     #old_data, new_data, old_dist, f, thresh
@@ -277,25 +274,65 @@ def connlevel_sequence(metadata, mapping):
     distS = compositeDist(dataS, values, ndistmS, 2 , thresh, 'Ngram')
     distD = compositeDist(dataD, values, ndistmD, 3 , thresh, 'Ngram')
     
+    # Normalizing the ones that need it (all together)
+    ndistmB = []
+    mini = min(min(distB))
+    maxi = max(max(distB))
+   
     
-    plt.savefig("tsne-result"+addition)
-    #plt.show()
+    for a in range(len(distB)):
+        ndistmB.append([])
+        for b in range(len(distB)):
+            normed = (distB[a][b] - mini) / (maxi-mini)
+            ndistmB[a].append(normed)
+            
+    ndistmG = []
+    mini = min(min(distG))
+    maxi = max(max(distG))
+   
+    
+    for a in range(len(distG)):
+        ndistmG.append([])
+        for b in range(len(distG)):
+            normed = (distG[a][b] - mini) / (maxi-mini)
+            ndistmG[a].append(normed)
+            
+    # Making a new composite dist matrix
+    ndistm = []
 
-    clu = joblib.load(sys.argv[1])
+    for a in range(len(distG)):#len(data.values())): #range(10):
+        ndistm.append([])
+        for b in range(len(distG)):
+            ndistm[a].append((ndistmB[a][b]+ndistmG[a][b]+distD[a][b]+distS[a][b])/4.0)
+       
+    plot_kwds = {'alpha': 0.5, 's' : 80, 'linewidths': 0}
+    RS=3072018
+    projection = TSNE(random_state=RS).fit_transform(ndistm)
+    plt.scatter(*projection.T)
+    for i,_ in enumerate(ndistm):#mapping.keys()): #zip([x[:1] for x in mapping.keys()],clu.labels_)):
+        if i >= len(dataB):
+            txt = 'new'#keys[i-len(dataB)]
+            plt.annotate('new', (projection.T[0][i],projection.T[1][i]), color='r', alpha=0.6)
+
+    #plt.savefig("tsne-result"+addition)
+    plt.show()
+
+    model = joblib.load(sys.argv[1])
 
     print('reloaded clustering model')
+    print('New points to be clustered', len(dataB)-len(ndistm))
     
-    sys.exit()
-    clu.predict()
+    for i in range(len(dataB)-len(ndistm)):
+        clu = model.predict(np.array(ndistm[i]))
+        print('assigned to', clu)
+    #print( "num clusters: " + str(len(set(clu.labels_))-1))
 
-    print( "num clusters: " + str(len(set(clu.labels_))-1))
-
-    avg = 0.0
-    for l in list(set(clu.labels_)):
-        if l !=-1:
-            avg+= sum([(1 if x==l else 0) for x in clu.labels_])
-    print( "avergae size of cluster:" + str(float(avg)/float(len(set(clu.labels_))-1)))
-    print( "samples in noise: " + str(sum([(1 if x==-1 else 0) for x in clu.labels_])))
+    #avg = 0.0
+    #for l in list(set(clu.labels_)):
+    #    if l !=-1:
+    #        avg+= sum([(1 if x==l else 0) for x in clu.labels_])
+    #print( "avergae size of cluster:" + str(float(avg)/float(len(set(clu.labels_))-1)))
+    #print( "samples in noise: " + str(sum([(1 if x==-1 else 0) for x in clu.labels_])))
     #clu.single_linkage_tree_.plot(cmap='viridis', colorbar=True)
     #plt.show()
     #clu.condensed_tree_.plot(select_clusters=True, selection_palette=sns.color_palette())
