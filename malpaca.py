@@ -14,6 +14,7 @@ from sklearn import metrics
 from scipy.spatial.distance import cdist, pdist, cosine, euclidean,cityblock
 import numpy as np
 import pandas as pd
+import joblib
 import matplotlib.pyplot as plt
 from sklearn.cluster import DBSCAN
 import json
@@ -501,7 +502,9 @@ def connlevel_sequence(metadata, mapping):
     size = 7
     sample= 7
 
-    clu = hdbscan.HDBSCAN(min_cluster_size = size,  min_samples = sample, cluster_selection_method='leaf', metric='precomputed').fit(np.array([np.array(x) for x in ndistm])) # final for citadel and dridex
+    model = hdbscan.HDBSCAN(min_cluster_size = size,  min_samples = sample, cluster_selection_method='leaf', metric='precomputed')
+    clu = model.fit(np.array([np.array(x) for x in ndistm])) # final for citadel and dridex
+    joblib.dump(clu, 'model'+addition+'.pkl')
     #print "size: " + str(size) + "sample: " + str(sample)+ " silhouette: " +  str(silhouette_score(ndistm, clu.labels_, metric='precomputed'))
 
     print( "num clusters: " + str(len(set(clu.labels_))-1))
