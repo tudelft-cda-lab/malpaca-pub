@@ -146,7 +146,6 @@ def connlevel_sequence(metadata, mapping):
             outfile.write(' '.join([str(l) for l in labels]) + '\n')
         with open('mapping'+addition+'.txt', 'w') as outfile:
            outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
-    print('bytes ', (endb-startb))
     ndistmB = []
     mini = min(min(distm))
     maxi = max(max(distm))
@@ -179,7 +178,6 @@ def connlevel_sequence(metadata, mapping):
         #print distm
         print( "found gaps.txt")
    
-    print('gaps ', (endg-startg))
     ndistmG = []
     mini = min(min(distm))
     maxi = max(max(distm))
@@ -270,7 +268,6 @@ def connlevel_sequence(metadata, mapping):
                 #print distm[a]
                 outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
-    print('sport ', (ends-starts))
 
     #mini = min(min(distm))
     #maxi = max(max(distm))
@@ -311,7 +308,6 @@ def connlevel_sequence(metadata, mapping):
         #print distm
         print( "found dport.txt")
     
-    print('dport ', (endd-startd))
     mini = min(min(distm))
     maxi = max(max(distm))
     #print mini
