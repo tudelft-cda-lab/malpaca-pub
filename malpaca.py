@@ -157,7 +157,7 @@ def connlevel_sequence(metadata, mapping):
 
             for a in range(len(data.values())): #range(10):
                 #distm.append([])
-                total_dataset['bytes'].apppend([x[1] for x in values[a]][:thresh])
+                total_dataset['bytes'].append([x[1] for x in values[a]][:thresh])
                 labels.append(mapping[keys[a]])
                 ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
                 for b in range(len(data.values())):
@@ -245,7 +245,7 @@ def connlevel_sequence(metadata, mapping):
 
             for a in range(len(data.values())): #range(10):
                 #distm.append([])
-                total_dataset['gaps'].apppend([x[0] for x in values[a]][:thresh])
+                total_dataset['gaps'].append([x[0] for x in values[a]][:thresh])
                 for b in range(len(data.values())):
 
                     i = [x[0] for x in values[a]][:thresh]
@@ -314,7 +314,7 @@ def connlevel_sequence(metadata, mapping):
         ngrams = []
         for a in range(len(values)):
             profile = dict()
-            total_dataset['sport'].apppend([x[3] for x in values[a]][:thresh])
+            total_dataset['sport'].append([x[3] for x in values[a]][:thresh])
             dat =  [x[3] for x in values[a]][:thresh]
 
             #ngrams.append(zip(dat, dat[1:], dat[2:]))
@@ -415,7 +415,7 @@ def connlevel_sequence(metadata, mapping):
         
             profile = dict()
             dat =  [x[4] for x in values[a]][:thresh]
-            total_dataset['dport'].apppend(dat)
+            total_dataset['dport'].append(dat)
             li = zip(dat, dat[1:], dat[2:])
             
             for b in li:
