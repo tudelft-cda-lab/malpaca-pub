@@ -45,6 +45,30 @@ thresh = 20
 if len(sys.argv) > 5:
     thresh = int(sys.argv[5])
 
+def readdatafile(filename):
+    data = []
+    for line in open(filename,'r').readlines():
+        content = line[:-1].split(',')
+        data.extend([float(x) for x in content])
+    
+    return copy.deepcopy(data)
+
+
+def readdistfile(filename):
+    distm = []
+    linecount = 0
+    for line in open(filename,'r').readlines():
+        distm.append([])
+        ele = line.split(" ")
+        for e in ele:
+            distm[linecount].append(float(e))
+        linecount+=1
+    
+    
+    return copy.deepcopy(distm)
+
+
+    
 
 
 def connlevel_sequence(metadata, mapping):
@@ -55,137 +79,59 @@ def connlevel_sequence(metadata, mapping):
 
     values = list(data.values())
     keys = list(data.keys())
-    distm = []
-    labels = []
     ipmapping = []
 
 
     addition = '-'+expname+'-'+str(thresh)
 
-    # ----- start porting -------
-
-
-
-    filename = 'bytesDist'+addition+'.txt'
-
-    distm = []
-    linecount = 0
-    for line in open(filename,'r').readlines():
-        distm.append([])
-        ele = line.split(" ")
-        for e in ele:
-            distm[linecount].append(float(e))
-        linecount+=1
-
-    for line in open('labels'+addition+'.txt','r').readlines():
+    past_exp = sys.argv[1].replace('model-', '').replace('.pkl', '')
+    
+    addition_past = '-'+past_exp
+    
+    # ---- Reloading old traces ---- #
+    filename = 'bytes'+addition_past+'.txt'
+    dataB = readdatafile(filename)
+    print( "loaded bytes data")
+    filename = 'gaps'+addition_past+'.txt'
+    dataG = readdatafile(filename)
+    print( "loaded gaps data")
+    filename = 'sport'+addition_past+'.txt'
+    dataS = readdatafile(filename)
+    print( "loaded sport data")
+    filename = 'dport'+addition_past+'.txt'
+    dataD = readdatafile(filename)
+    print( "loaded dport data")
+    
+    # ----- Reloading old distance matrices for tsne plot ---- #
+    labels = []
+    for line in open('labels'+addition_past+'.txt','r').readlines():
         labels = [int(e) for e in line.split(' ')]
-
-    print( "found bytes.txt")
-
-
-    ndistmB = copy.deepcopy(distm)
-
-
-    distm = []
-
-    filename = 'gapsDist'+addition+'.txt'
-
-
-    linecount = 0
-    for line in open(filename,'r').readlines():
-        distm.append([])
-        ele = line.split(" ")
-        for e in ele:
-            try:
-                distm[linecount].append(float(e))
-            except:
-                print( "error on: " + e)
-        linecount+=1
-
-
-    #print distm
-    print( "found gaps.txt")
-
-    ndistmG = copy.deepcopy(distm)
-
-
-    # source port
-    ndistmS= []
-    distm = []
-
-
-    filename = 'sportDist'+addition+'.txt'
-    same , diff = set(), set()
-
-
-    linecount = 0
-    for line in open(filename,'r').readlines():
-        distm.append([])
-        ele = line.split(" ")
-        for e in ele:
-            try:
-                distm[linecount].append(float(e))
-            except:
-                print( "error on: " + e)
-        linecount+=1
-
-
-    #print distm
-    print( "found sport.txt")
-
-
-    ndistmS = copy.deepcopy(distm)
-
-
-
-
-    # dest port
-    ndistmD= []
-    distm = []
-
-    filename = 'dportDist'+addition+'.txt'
-
-
-    linecount = 0
-    for line in open(filename,'r').readlines():
-        distm.append([])
-        ele = line.split(" ")
-        for e in ele:
-            try:
-                distm[linecount].append(float(e))
-            except:
-                print( "error on: " + e)
-        linecount+=1
-
-
-    #print distm
-    print( "found dport.txt")
-
-
-    ndistmD = copy.deepcopy(distm)
+        
+    filename = 'bytesDist'+addition_past+'.txt'
+    ndistmB = readdistfile(filename)
+    print( "loaded bytes dist")
+    filename = 'gapsDist'+addition_past+'.txt'
+    ndistmG = readdistfile(filename)
+    print( "loaded gaps dist")
+    filename = 'sportDist'+addition_past+'.txt'
+    ndistmS = readdistfile(filename)
+    print( "loaded sport dist")
+    filename = 'dportDist'+addition_past+'.txt'
+    ndistmD = readdistfile(filename)
+    print( "loaded dport dist")
 
     ndistm = []
 
-
     for a in range(len(ndistmS)):#len(data.values())): #range(10):
-
         ndistm.append([])
         for b in range(len(ndistmS)):
             ndistm[a].append((ndistmB[a][b]+ndistmG[a][b]+ndistmD[a][b]+ndistmS[a][b])/4.0)
-        #print "a: " + str(mapping[keys[a]]) + " b: " + str(mapping[keys[b]]) + " dist: " + str(ndistm[a][b])
 
-
-    #print ndistm[len(ndistm)-1]
-
-
-    print("done distance meaurement")
+    print("done reloading everything")
     print(len(ndistm))
     print(len(ndistm[0]))
-    print(labels)
     print(len(labels))
     #print "effective number of connections: " + str(len(dist))
-
-
 
     plot_kwds = {'alpha': 0.5, 's' : 80, 'linewidths': 0}
     RS=3072018
@@ -194,9 +140,12 @@ def connlevel_sequence(metadata, mapping):
     plt.savefig("tsne-result"+addition)
     #plt.show()
 
+    clu = joblib.load(sys.argv[1])
 
-
-    clu = joblib.load(sys.argv[1]) 
+    print('reloaded clustering model')
+    
+    sys.exit()
+    clu.predict(new samples)
 
     print( "num clusters: " + str(len(set(clu.labels_))-1))
 
