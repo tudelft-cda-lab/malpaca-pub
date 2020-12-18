@@ -45,6 +45,46 @@ thresh = 20
 if len(sys.argv) > 5:
     thresh = int(sys.argv[5])
 
+def computeDTW(old_data, new_data, old_dist, f, thresh):
+    print("starting dist computation")
+    #distm = [-1] * len(old_data)
+    #distm = [[-1]*len(new_data) for i in distm]
+    new_dist = dict()
+    for a in range(len(new_data)):
+        for b in range(len(old_data)):
+            i = [x[f] for x in new_data[a]][:thresh]
+            j = old_data[b][:thresh]
+            if len(i) == 0 or len(j) == 0: continue             
+            dist,_= fastdtw(i,j,dist=euclidean)
+            
+            if a not in new_dist.keys():
+                new_dist[a] = dict()
+            if b not in new_dist[a].keys():
+                new_dist[a][b] = dist
+        
+    # make a full dist matrix
+    comp = []
+    for i in range(len(old_data)+len(new_data)):
+        c = []
+        for j in range(len(old_data)+len(new_data)):
+            #print(i,j, len(old_data), len(new_data))
+            if i < len(old_data) and j < len(old_data):
+                c.append(old_dist[i][j])
+                #print('-- ', old_dist[i][j])
+            elif j >= len(old_data) and i < len(old_data):
+                c.append(new_dist[j-len(old_data)][i])
+                #print('-- ', new_dist[j-len(old_data)][i])
+            elif i >= len(old_data) and j < len(old_data):
+                c.append(new_dist[i-len(old_data)][j])
+                #print('-- ', new_dist[i-len(old_data)][j])
+            else:
+                c.append(0.0)
+        print(c)
+        comp.append(c)
+    
+    return comp
+
+
 def readdatafile(filename):
     data = []
     for line in open(filename,'r').readlines():
@@ -137,6 +177,14 @@ def connlevel_sequence(metadata, mapping):
     RS=3072018
     projection = TSNE(random_state=RS).fit_transform(ndistm)
     plt.scatter(*projection.T)
+    
+    # plot new points here
+    old_data, new_data, old_dist, f, thresh
+    # old_data, new_data, thresh
+    distB = computeDTW(dataB, values, ndistmB, 1 , thresh)
+    distG = computeDTW(dataG, values, ndistmG, 0 , thresh)
+    
+    
     plt.savefig("tsne-result"+addition)
     #plt.show()
 
