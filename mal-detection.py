@@ -50,13 +50,13 @@ def computeDTW(old_data, new_data, old_dist, f, thresh):
     #distm = [-1] * len(old_data)
     #distm = [[-1]*len(new_data) for i in distm]
     new_dist = dict()
+    print(len(old_data), len(new_data))
     for a in range(len(new_data)):
         for b in range(len(old_data)):
             i = [x[f] for x in new_data[a]][:thresh]
             j = old_data[b][:thresh]
             if len(i) == 0 or len(j) == 0: continue             
             dist,_= fastdtw(i,j,dist=euclidean)
-            
             if a not in new_dist.keys():
                 new_dist[a] = dict()
             if b not in new_dist[a].keys():
@@ -89,8 +89,7 @@ def readdatafile(filename):
     data = []
     for line in open(filename,'r').readlines():
         content = line[:-1].split(',')
-        data.extend([float(x) for x in content])
-    
+        data.append([float(x) for x in content])
     return copy.deepcopy(data)
 
 
@@ -179,7 +178,7 @@ def connlevel_sequence(metadata, mapping):
     plt.scatter(*projection.T)
     
     # plot new points here
-    old_data, new_data, old_dist, f, thresh
+    #old_data, new_data, old_dist, f, thresh
     # old_data, new_data, thresh
     distB = computeDTW(dataB, values, ndistmB, 1 , thresh)
     distG = computeDTW(dataG, values, ndistmG, 0 , thresh)
