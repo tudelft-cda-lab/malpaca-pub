@@ -475,7 +475,8 @@ def connlevel_sequence(metadata, mapping):
     for feat,vals in total_dataset.items():
         f = open(feat+'-features'+addition, 'w')
         for v in vals:
-            f.write(','.join(v))
+            vi = [str(x) for x in v]
+            f.write(','.join(vi))
             f.write("\n")
         f.close()
     print("done distance meaurement")
