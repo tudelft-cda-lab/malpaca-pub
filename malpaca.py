@@ -63,7 +63,7 @@ def connlevel_sequence(metadata, mapping):
     data = metadata
     timing= {}
 
-    total_dataset = dict()
+
     values = list(data.values())
     keys = list(data.keys())
     distm = []
@@ -97,8 +97,18 @@ def connlevel_sequence(metadata, mapping):
         dtw = rpackages.importr('IncDTW')
         r  = robjects.r
 
+    for n,feat in [(1, 'bytes'), (0, 'gaps'), (2, 'sport'), (3, 'dport')]:
+        f = open(feat+'-features'+addition, 'w')
+        for val in values:
+                vi = [str(x[n]) for x in val]
+                f.write(','.join(vi))
+                f.write("\n")
+        f.close()
+
+
+
     startb = time.time()
-    total_dataset['bytes'] = []
+
     filename = 'bytesDist'+addition+'.txt'
     if os.path.exists(filename):
         distm = []
@@ -158,7 +168,7 @@ def connlevel_sequence(metadata, mapping):
 
             for a in range(len(data.values())): #range(10):
                 #distm.append([])
-                total_dataset['bytes'].append([x[1] for x in values[a]][:thresh])
+
                 labels.append(mapping[keys[a]])
                 ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
                 for b in range(len(data.values())):
@@ -199,7 +209,7 @@ def connlevel_sequence(metadata, mapping):
     startg = time.time()
     distm = []
     
-    total_dataset['gaps'] = []
+
     filename = 'gapsDist'+addition+'.txt'
     if os.path.exists(filename):
 
@@ -246,7 +256,7 @@ def connlevel_sequence(metadata, mapping):
 
             for a in range(len(data.values())): #range(10):
                 #distm.append([])
-                total_dataset['gaps'].append([x[0] for x in values[a]][:thresh])
+
                 for b in range(len(data.values())):
 
                     i = [x[0] for x in values[a]][:thresh]
@@ -287,7 +297,7 @@ def connlevel_sequence(metadata, mapping):
 
 
     starts = time.time()
-    total_dataset['sport'] = []
+
     filename = 'sportDist'+addition+'.txt'
     same , diff = set(), set()
     if os.path.exists(filename):
@@ -315,7 +325,7 @@ def connlevel_sequence(metadata, mapping):
         ngrams = []
         for a in range(len(values)):
             profile = dict()
-            total_dataset['sport'].append([x[3] for x in values[a]][:thresh])
+
             dat =  [x[3] for x in values[a]][:thresh]
 
             #ngrams.append(zip(dat, dat[1:], dat[2:]))
@@ -388,7 +398,7 @@ def connlevel_sequence(metadata, mapping):
     distm = []
 
     startd = time.time()
-    total_dataset['dport'] = []
+
     filename = 'dportDist'+addition+'.txt'
     if os.path.exists(filename):
 
@@ -416,7 +426,7 @@ def connlevel_sequence(metadata, mapping):
         
             profile = dict()
             dat =  [x[4] for x in values[a]][:thresh]
-            total_dataset['dport'].append(dat)
+
             li = zip(dat, dat[1:], dat[2:])
             
             for b in li:
@@ -473,13 +483,7 @@ def connlevel_sequence(metadata, mapping):
 
     #print ndistm[len(ndistm)-1]
     
-    for feat,vals in total_dataset.items():
-        f = open(feat+'-features'+addition, 'w')
-        for v in vals:
-            vi = [str(x) for x in v]
-            f.write(','.join(vi))
-            f.write("\n")
-        f.close()
+
     print("done distance meaurement")
     print(len(ndistm))
     print(len(ndistm[0]))
