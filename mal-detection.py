@@ -63,7 +63,7 @@ def computeDTW(old_data, new_data, f, thresh):
                 new_dist[a][b] = dist
                 
     new_new_dist = dict()
-    print(len(old_data), len(new_data))
+
     for a in range(len(new_data)):
         for b in range(len(new_data)):
             i = [x[f] for x in new_data[a]][:thresh]
@@ -92,7 +92,7 @@ def computeNgram(old_data, new_data, f, thresh):
             if b not in profile.keys():
                 profile[b] = 0
             profile[b] += 1  
-        ngrams.append(profile)
+        old_ngrams.append(profile)
     
     new_ngrams = []    
     for a in range(len(new_data)):
@@ -148,7 +148,7 @@ def compositeDist(old_data, new_data, old_dist, f, thresh, method):
     new_dist, new_new_dist = None, None
     if method == 'DTW': 
         new_dist, new_new_dist  = computeDTW(old_data, new_data, f, thresh)
-    else 
+    else:
         new_dist, new_new_dist  = computeNgram(old_data, new_data, f, thresh)
         
     # make a full dist matrix
