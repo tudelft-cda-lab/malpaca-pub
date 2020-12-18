@@ -79,32 +79,69 @@ def computeDTW(old_data, new_data, f, thresh):
 def computeNgram(old_data, new_data, f, thresh):
     print("starting ngram dist computation")
     
-    new_dist = dict()
+    
     print(len(old_data), len(new_data))
+    
+    old_ngrams = []
+    for a in range(len(old_data)):
+        profile = dict()
+        dat =  old_data[a][:thresh]
+
+        li = zip(dat, dat[1:], dat[2:])
+        for b in li:
+            if b not in profile.keys():
+                profile[b] = 0
+            profile[b] += 1  
+        ngrams.append(profile)
+    
+    new_ngrams = []    
     for a in range(len(new_data)):
-        for b in range(len(old_data)):
-            i = [x[f] for x in new_data[a]][:thresh]
-            j = old_data[b][:thresh]
-            if len(i) == 0 or len(j) == 0: continue             
-            dist,_= fastdtw(i,j,dist=euclidean)
+        profile = dict()
+        dat =  [x[f] for x in new_data[a]][:thresh]
+
+        li = zip(dat, dat[1:], dat[2:])
+        for b in li:
+            if b not in profile.keys():
+                profile[b] = 0
+            profile[b] += 1  
+        new_ngrams.append(profile)
+    
+    new_dist = dict()
+    for a in range(len(new_ngrams)):
+        for b in range(len(old_ngrams)):
+
+            i = new_ngrams[a]
+            j = old_ngrams[b]
+            ngram_all = list(set(i.keys()) | set(j.keys()))
+            i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
+            j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
+                                         
+            dist = cosine(i_vec, j_vec)
+            
             if a not in new_dist.keys():
                 new_dist[a] = dict()
             if b not in new_dist[a].keys():
-                new_dist[a][b] = dist
+                new_dist[a][b] = dist 
                 
     new_new_dist = dict()
-    print(len(old_data), len(new_data))
-    for a in range(len(new_data)):
-        for b in range(len(new_data)):
-            i = [x[f] for x in new_data[a]][:thresh]
-            j = [x[f] for x in new_data[b]][:thresh]
-            if len(i) == 0 or len(j) == 0: continue             
-            dist,_= fastdtw(i,j,dist=euclidean)
+    for a in range(len(new_ngrams)):
+        for b in range(len(new_ngrams)):
+
+            i = new_ngrams[a]
+            j = new_ngrams[b]
+            ngram_all = list(set(i.keys()) | set(j.keys()))
+            i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
+            j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
+                                         
+            dist = cosine(i_vec, j_vec)
+            
             if a not in new_new_dist.keys():
                 new_new_dist[a] = dict()
             if b not in new_new_dist[a].keys():
-                new_new_dist[a][b] = dist
+                new_new_dist[a][b] = dist 
     return (new_dist, new_new_dist)
+
+                
 
 def compositeDist(old_data, new_data, old_dist, f, thresh, method):
     
