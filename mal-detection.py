@@ -61,6 +61,19 @@ def computeDTW(old_data, new_data, old_dist, f, thresh):
                 new_dist[a] = dict()
             if b not in new_dist[a].keys():
                 new_dist[a][b] = dist
+                
+    new_new_dist = dict()
+    print(len(old_data), len(new_data))
+    for a in range(len(new_data)):
+        for b in range(len(new_data)):
+            i = [x[f] for x in new_data[a]][:thresh]
+            j = [x[f] for x in new_data[b]][:thresh]
+            if len(i) == 0 or len(j) == 0: continue             
+            dist,_= fastdtw(i,j,dist=euclidean)
+            if a not in new_new_dist.keys():
+                new_new_dist[a] = dict()
+            if b not in new_new_dist[a].keys():
+                new_new_dist[a][b] = dist
         
     # make a full dist matrix
     comp = []
@@ -78,7 +91,7 @@ def computeDTW(old_data, new_data, old_dist, f, thresh):
                 c.append(new_dist[i-len(old_data)][j])
                 #print('-- ', new_dist[i-len(old_data)][j])
             else:
-                c.append(0.0)
+                c.append(new_new_dist[j-len(old_data)][i-len(old_data)])
         print(c)
         comp.append(c)
     
