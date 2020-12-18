@@ -4,6 +4,7 @@ import sys, dpkt, datetime, glob, os, operator, subprocess, csv
 import socket
 import matplotlib
 from collections import deque
+import copy
 from itertools import permutations
 from dtw import dtw
 from fastdtw import fastdtw
@@ -59,70 +60,53 @@ def connlevel_sequence(metadata, mapping):
     ipmapping = []
 
 
-    addition = '-det-'+expname+'-'+str(thresh)
+    addition = '-'+expname+'-'+str(thresh)
 
     # ----- start porting -------
 
 
 
     filename = 'bytesDist'+addition+'.txt'
-    if os.path.exists(filename):
-        distm = []
-        linecount = 0
-        for line in open(filename,'r').readlines():
-            distm.append([])
-            ele = line.split(" ")
-            for e in ele:
-                distm[linecount].append(float(e))
-            linecount+=1
 
-        for line in open('labels'+addition+'.txt','r').readlines():
-            labels = [int(e) for e in line.split(' ')]
+    distm = []
+    linecount = 0
+    for line in open(filename,'r').readlines():
+        distm.append([])
+        ele = line.split(" ")
+        for e in ele:
+            distm[linecount].append(float(e))
+        linecount+=1
 
-        print( "found bytes.txt")
+    for line in open('labels'+addition+'.txt','r').readlines():
+        labels = [int(e) for e in line.split(' ')]
 
-
-    ndistmB = []
-    mini = min(min(distm))
-    maxi = max(max(distm))
+    print( "found bytes.txt")
 
 
-    for a in range(len(distm)):
-        ndistmB.append([])
-        for b in range(len(distm)):
-            normed = (distm[a][b] - mini) / (maxi-mini)
-            ndistmB[a].append(normed)
+    ndistmB = copy.deepcopy(distm)
 
 
     distm = []
 
     filename = 'gapsDist'+addition+'.txt'
-    if os.path.exists(filename):
-
-        linecount = 0
-        for line in open(filename,'r').readlines():
-            distm.append([])
-            ele = line.split(" ")
-            for e in ele:
-                try:
-                    distm[linecount].append(float(e))
-                except:
-                    print( "error on: " + e)
-            linecount+=1
 
 
-        #print distm
-        print( "found gaps.txt")
+    linecount = 0
+    for line in open(filename,'r').readlines():
+        distm.append([])
+        ele = line.split(" ")
+        for e in ele:
+            try:
+                distm[linecount].append(float(e))
+            except:
+                print( "error on: " + e)
+        linecount+=1
 
-    ndistmG = []
-    mini = min(min(distm))
-    maxi = max(max(distm))
 
-    for a in range(len(distm)):#len(data.values())): #range(10):
-        ndistmG.append([])
-        for b in range(len(distm)):
-            normed = (distm[a][b] - mini) / (maxi-mini)
-            ndistmG[a].append(normed)
+    #print distm
+    print( "found gaps.txt")
+
+    ndistmG = copy.deepcopy(distm)
 
 
     # source port
@@ -132,92 +116,25 @@ def connlevel_sequence(metadata, mapping):
 
     filename = 'sportDist'+addition+'.txt'
     same , diff = set(), set()
-    if os.path.exists(filename):
-
-        linecount = 0
-        for line in open(filename,'r').readlines():
-            distm.append([])
-            ele = line.split(" ")
-            for e in ele:
-                try:
-                    distm[linecount].append(float(e))
-                except:
-                    print( "error on: " + e)
-            linecount+=1
 
 
-        #print distm
-        print( "found sport.txt")
-
-        print("starting sport dist")
-        distm = [-1] * len(data.values())
-        distm = [[-1]*len(data.values()) for i in distm]
-
-
-        ngrams = []
-        for a in range(len(values)):
-            profile = dict()
-            dat =  [x[3] for x in values[a]][:thresh]
-
-            #ngrams.append(zip(dat, dat[1:], dat[2:]))
-            li = zip(dat, dat[1:], dat[2:])
-            for b in li:
-                if b not in profile.keys():
-                    profile[b] = 0
-
-                profile[b] += 1
+    linecount = 0
+    for line in open(filename,'r').readlines():
+        distm.append([])
+        ele = line.split(" ")
+        for e in ele:
+            try:
+                distm[linecount].append(float(e))
+            except:
+                print( "error on: " + e)
+        linecount+=1
 
 
-            ngrams.append(profile)
+    #print distm
+    print( "found sport.txt")
 
-
-        #print ngrams[0]
-        profiles = []
-        # update for arrays
-
-
-        assert len(ngrams) == len(values)
-        for a in range(len(ngrams)):
-            # distm.append([])
-            #labels.append(mapping[keys[a]])
-            for b in range(len(ngrams)):
-
-                i = ngrams[a]
-                j = ngrams[b]
-                ngram_all = list(set(i.keys()) | set(j.keys()))
-                i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
-                j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
-
-
-                if a==b:
-                    distm[a][b] = 0.0
-                elif b>a:
-
-                    dist = cosine(i_vec, j_vec)
-                    distm[a][b] = dist
-                    distm[b][a] = dist
-
-
-
-        with open(filename, 'w') as outfile:
-            for a in range(len(distm)):#len(data.values())): #range(10):
-                #print distm[a]
-                outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-
-    #mini = min(min(distm))
-    #maxi = max(max(distm))
-    #print mini
-    #print maxi
-    #print "effective connections " + str(len(distm[0]))
-    #print "effective connections  " + str(len(distm))
-
-
-    for a in range(len(distm)):#len(data.values())): #range(10):
-        ndistmS.append([])
-        for b in range(len(distm)):
-            #normed = (distm[a][b] - mini) / (maxi-mini)
-            ndistmS[a].append(distm[a][b])
+        
+    ndistmS = copy.deepcopy(distm)
 
 
 
@@ -227,34 +144,28 @@ def connlevel_sequence(metadata, mapping):
     distm = []
 
     filename = 'dportDist'+addition+'.txt'
-    if os.path.exists(filename):
-
-        linecount = 0
-        for line in open(filename,'r').readlines():
-            distm.append([])
-            ele = line.split(" ")
-            for e in ele:
-                try:
-                    distm[linecount].append(float(e))
-                except:
-                    print( "error on: " + e)
-            linecount+=1
 
 
-        #print distm
-        print( "found dport.txt")
+    linecount = 0
+    for line in open(filename,'r').readlines():
+        distm.append([])
+        ele = line.split(" ")
+        for e in ele:
+            try:
+                distm[linecount].append(float(e))
+            except:
+                print( "error on: " + e)
+        linecount+=1
 
-    mini = min(min(distm))
-    maxi = max(max(distm))
-    #print mini
-    #print maxi
-    for a in range(len(distm)):#len(data.values())): #range(10):
-        ndistmD.append([])
-        for b in range(len(distm)):
-            #normed = (distm[a][b] - mini) / (maxi-mini)
-            ndistmD[a].append(distm[a][b])
+
+    #print distm
+    print( "found dport.txt")
+
+
+    ndistmD = copy.deepcopy(distm)
 
     ndistm = []
+
 
     for a in range(len(ndistmS)):#len(data.values())): #range(10):
 
