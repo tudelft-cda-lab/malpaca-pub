@@ -126,7 +126,6 @@ def computeNgram(old_data, new_data, f, thresh):
     new_new_dist = dict()
     for a in range(len(new_ngrams)):
         for b in range(len(new_ngrams)):
-
             i = new_ngrams[a]
             j = new_ngrams[b]
             ngram_all = list(set(i.keys()) | set(j.keys()))
@@ -325,21 +324,7 @@ def connlevel_sequence(metadata, mapping):
     print('reloaded clustering model')
     print('New points to be clustered', len(ndistm)-len(dataB))
     
-    #for i in range(len(dataB),len(ndistm)):
-    #    clu = model.predict(np.array(ndistm[i]))
-    #    print('assigned to', clu)
-    #print( "num clusters: " + str(len(set(clu.labels_))-1))
-    
-    #avg = 0.0
-    #for l in list(set(clu.labels_)):
-    #    if l !=-1:
-    #        avg+= sum([(1 if x==l else 0) for x in clu.labels_])
-    #print( "avergae size of cluster:" + str(float(avg)/float(len(set(clu.labels_))-1)))
-    #print( "samples in noise: " + str(sum([(1 if x==-1 else 0) for x in clu.labels_])))
-    #clu.single_linkage_tree_.plot(cmap='viridis', colorbar=True)
-    #plt.show()
-    #clu.condensed_tree_.plot(select_clusters=True, selection_palette=sns.color_palette())
-    #plt.show()
+   
 
     cols = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen', 'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown', 'maroon' ,'deepskyblue', 'silver']
     pal = sns.color_palette(cols)#
@@ -368,11 +353,7 @@ def connlevel_sequence(metadata, mapping):
         if i >= len(dataB):
             #print(keys[len(dataB)-i], 'assigned to cluster', txt)
             el = keys[len(dataB)-i]
-            #ip = el.split('->')
-            #if '-' in ip[0]:
-            #    classname = el.split('-')[0]
-            #else:
-            #    classname = el.split('.pcap')[0]
+           
 
             filename = el.split('.pcap')[0]
             if filename not in maslist.keys():
@@ -391,79 +372,62 @@ def connlevel_sequence(metadata, mapping):
     print('---------')
     print('Cluster Membership Strings')
     for name, mas in maslist.items():
+        
+        classname = ''
+        if '-' in name:
+            classname = name.split('-')[0]
+        else:
+            classname = name.split('.pcap')[0]
         ms = ''.join([str(x) for x in mas[:-1]])
-        print(name, ms)
+        print(name, classname, ms)
     print('---------')
     
-    # writing csv file
-    '''print("writing csv file")
-    final_clusters = {}
-    final_probs = {}
-    for lab in set(clu.labels_):
-        occ = [i for i,x in enumerate(clu.labels_) if x == lab]
-        final_probs[lab] = [x for i,x in zip(clu.labels_, clu.probabilities_) if i == lab]
-        print( "cluster: " + str(lab)+ " num items: "+ str(len([labels[x] for x in occ])))
-        final_clusters[lab] = [labels[x] for x in occ]
 
-    csv_file = 'clusters'+addition+'.csv'
-    outfile = open(csv_file, 'w')
-    outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
-
-
-    for n,clus in final_clusters.items():
-        #print "cluster numbeR: " + str(n)
-
-        for idx,el in  enumerate([inv_mapping[x] for x in clus]):
-            print(el)
-            ip = el.split('->')
-            if '-' in ip[0]:
-                classname = el.split('-')[0]
-            else:
-                classname = el.split('.pcap')[0]
-
-            filename = el.split('.pcap')[0]
-            #print(str(n)+","+ip[0]+","+ip[1]+","+str(final_probs[n][idx])+","+str(mapping[el])+"\n")
-            outfile.write(str(n)+","+str(mapping[el])+","+str(final_probs[n][idx])+","+str(classname)+","+str(filename)+","+ip[0]+","+ip[1]+"\n")
-    outfile.close()
     # Making tree
     print('Producing DAG with relationships between pcaps')
     clusters = {}
-    numclus = len(set(clu.labels_))
-    with open(csv_file, 'r') as f1:
-        reader = csv.reader(f1, delimiter = ',')
-        for i,line in enumerate(reader):#f1.readlines()[1:]:
-            if i > 0:
-                if line[4] not in clusters.keys():
-                    clusters[line[4]] = []
-                clusters[line[4]].append((line[3],line[0])) # classname, cluster#
-    print(clusters)
-    f1.close()
-    array = [str(x) for x in range(numclus-1)]
-    array.append("-1")
+    #numclus = len(set(clu.labels_))
+
     treeprep = dict()
-    for filename,val in clusters.items():
-        for fam, clus in val:
+    new_mas = set()
+    for name, ms in maslist.items():
+        mas = ''.join([str(x) for x in ms[:-1]])
 
-            arr = [0]*numclus
+        famname = ''
+        if '-' in name:
+            famname = name.split('-')[0]
+        else:
+            famname = name.split('.pcap')[0]
+            
+        if mas not in treeprep.keys():
+            treeprep[mas] = dict()
+            new_mas.add(mas)
+        if famname not in treeprep[mas].keys():
+            treeprep[mas][famname] = 0
+        treeprep[mas][famname] += 1
 
-            ind = array.index(clus)
 
-            arr[ind] = 1
-
-            mas = ''.join([str(x) for x in arr[:-1]])
-            famname = fam
-            print(filename + "\t"+ fam+"\t"+''.join([str(x) for x in arr[:-1]]))
+    with open('mas-details'+addition_past+'.csv', 'rU') as f3:
+        csv_reader = csv.reader(f3, delimiter=';')
+        for i,line in enumerate(csv_reader):
+            #print('reading old file', line)
+            mas = line[0]
+            fam = line[1]
+            count = line[2]
             if mas not in treeprep.keys():
                 treeprep[mas] = dict()
-            if famname not in treeprep[mas].keys():
-                treeprep[mas][famname] = set()
-            treeprep[mas][famname].add(str(filename))
+            if fam not in treeprep[mas].keys():
+                treeprep[mas][fam] = int(count)
+            else:
+                treeprep[mas][fam] += int(count)
+        
 
+    
     f2 = open('mas-details'+addition+'.csv', 'w')
     for k,v in treeprep.items():
         for kv,vv in v.items():
-            print(k, str(kv), (vv))
-            f2.write(str(k)+';'+str(kv)+';'+str(len(vv))+'\n')
+            #print(k, str(kv), (vv))
+            f2.write(str(k)+';'+str(kv)+';'+str(vv)+'\n')
     f2.close()
 
     with open('mas-details'+addition+'.csv', 'rU') as f3:
@@ -478,7 +442,7 @@ def connlevel_sequence(metadata, mapping):
             names[line[0]].append(line[1]+"("+line[2]+")")
 
         ulist = graph.keys()
-        print(len(ulist))
+        #print(len(ulist))
         covered = set()
         next = deque()
 
@@ -508,10 +472,8 @@ def connlevel_sequence(metadata, mapping):
         notmain = [x for _,x in sorted(zip(nums,notmain))]
 
         specials = notmain
-        print(notmain)
-        print(len(notmain))
-
-
+        #print(notmain)
+        #print(len(notmain))
 
         extras = set()
 
@@ -565,12 +527,12 @@ def connlevel_sequence(metadata, mapping):
                 for l in li:
                     name+=l+',\n'
                 #print(str(idx) + " [label=\""+str(num)+"\"]")
-                if idx not in specials:
-                    print(str(idx) + " [label=\""+name+"\"]")
+                if idx not in new_mas:
+                    #print(str(idx) + " [label=\""+name+"\"]")
                     text = str(idx) + " [label=\""+name+"\" , shape=box;]"
                 else:
-                    print(str(idx) + " [style=\"filled\" fillcolor=\"red\" label=\""+name+"\"]")
-                    text = str(idx) + " [style=\"filled\" shape=box, fillcolor=\"red\" label=\""+name+"\"]"
+                    #print(str(idx) + " [style=\"filled\" fillcolor=\"red\" label=\""+name+"\"]")
+                    text = str(idx) + " [style=\"filled,dotted\" shape=box, fillcolor=\"salmon\" label=\""+name+"\"]"
 
                 f2.write(text)
                 f2.write('\n')
@@ -588,7 +550,7 @@ def connlevel_sequence(metadata, mapping):
             print('Done')
         except:
             print('Failed')
-            pass'''
+            pass
 
 
     # temporal heatmaps start
