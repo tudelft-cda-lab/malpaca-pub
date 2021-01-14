@@ -10,7 +10,7 @@ This repo contains the implementation of MalPaCA (Malware Packet-sequence Cluste
 6. The final diatcne matrix goes as input into HDBScan clustering algorithm
 7. The final clusters are post-processed and printed out as a .csv and in their respective temporal heatmaps.
 
-## Usage:
+## Usage (for clustering):
 `python malpaca.py {file|folder} {path/to/file|path/to/folder} {experiment-name} {sequence-length-threshold} {speedup}`
 
 `{file|folder}` : Choose one option for either one pcap or multiple in a folder
@@ -27,6 +27,19 @@ Required packages:
 
 `sudo apt-get install r-base-dev` (If you want to use the `speedup`)
 
+## Usage (for re-clustering):
+`python mal-detection.py {path/to/model.pkl} {file|folder} {path/to/file|path/to/folder} {experiment-name} {sequence-length-threshold}`
+
+`{path/to/model.pkl}` : Path to the model file of the prior experiment, to which you want to re-cluster new sequences
+
+`{file|folder}` : (For the new experiment) Choose one option for either one pcap or multiple in a folder
+
+`{path/to/file|path/to/folder}`: (For the new experiment) Path to .pcap file (if `file` selected) or folder containing .pcap files (if `folder` selected) 
+
+`{experiment-name}` : (For the new experiment) Name of your new experiments. It will be used to name the generated artifacts, i.e. distance matrices, tsne plots, clusters.
+
+`{sequence-length-threshold}` : (For the new experiment) Length of feature sequences, i.e. number of packets per sequence to consider for clustering
+
 ## Parameters:
 
 1. ngram order : Size of the sliding window for port numbers. Can be found as `ngrams.append(zip(x,x+1,x+2))`. _Default: 3_
@@ -40,9 +53,15 @@ Required packages:
 - If connection length falls less than 3 packets, this code will fail (due to trigram calculation).
 - If number of clusters are 0 for some reason, this code will fail.
 
-**If you use MalPaCA in a scientific work, please cite the following paper:**
+**If you use MalPaCA in a scientific work, consider citing the following paper:**
 
-_Beyond Labeling: Using Clustering to Build Network Behavioral Profiles of Malware Families. Azqa Nadeem, Christian Hammerschmidt, Carlos H. Ganan, Sicco Verwer. In Malware Analysis using Artificial Intelligence and Deep Learning, Springer, 2020._
+_@article{nadeembeyond,
+  title={Beyond Labeling: Using Clustering to Build Network Behavioral Profiles of Malware Families},
+  author={Nadeem, Azqa and Hammerschmidt, Christian and Ga{\~n}{\'a}n, Carlos H and Verwer, Sicco},
+  journal={Malware Analysis Using Artificial Intelligence and Deep Learning},
+  pages={381},
+  publisher={Springer}
+}_
 
 #### Azqa Nadeem
 #### TU Delft
