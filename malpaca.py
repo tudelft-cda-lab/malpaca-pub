@@ -460,7 +460,7 @@ def connlevel_sequence(metadata, mapping):
         
 
     endd = time.time()
-    print('dport ', (endd-startd))
+    print('time dport ', (endd-startd))
     mini = min(min(distm))
     maxi = max(max(distm))
     #print mini
@@ -487,8 +487,6 @@ def connlevel_sequence(metadata, mapping):
     print("done distance meaurement")
     print(len(ndistm))
     print(len(ndistm[0]))
-    print(labels)
-    print(len(labels))
     #print "effective number of connections: " + str(len(dist))
 
     
@@ -538,17 +536,33 @@ def connlevel_sequence(metadata, mapping):
     mem_col = [sns.desaturate(x,p) for x,p in zip(col,clu.probabilities_)]
 
     plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.2)
+    
+    #classes = ['Alexa', 'Hue', 'Somfy', 'malware']
+    #print([(x, col[i]) for i,x in enumerate(classes)])
     for i,txt in enumerate(clu.labels_):#mapping.keys()): #zip([x[:1] for x in mapping.keys()],clu.labels_)):
-        #if txt == -1:
-        #   continue
-        plt.scatter(projection.T[0][i],projection.T[1][i], color=col[i], alpha=0.6)
-        plt.annotate(txt, (projection.T[0][i],projection.T[1][i]), color=col[i], alpha=0.6)
 
+        realind = labels[i]
+        name = inv_mapping[realind]
+        '''thiscol = None
+        thislab = None
+        for cdx, cc in enumerate(classes):
+            if cc in name:
+                thiscol = col[cdx]
+                thislab = cc
+                break'''
+        plt.scatter(projection.T[0][i],projection.T[1][i], color=col[i], alpha=0.6)
+        if txt == -1:
+           continue
+
+        plt.annotate(txt, (projection.T[0][i],projection.T[1][i]), color=col[i], alpha=0.6)
+        #plt.scatter(projection.T[0][i],projection.T[1][i], color=col[i], alpha=0.6)
+        #plt.annotate(thislab, (projection.T[0][i],projection.T[1][i]), color=thiscol, alpha=0.2)
+    
     plt.savefig("clustering-result"+addition)
     #plt.show()
 
 
-
+    
     # writing csv file
     print("writing csv file")
     final_clusters = {}
@@ -565,20 +579,27 @@ def connlevel_sequence(metadata, mapping):
 
 
     for n,clus in final_clusters.items():
+        
+        
         #print "cluster numbeR: " + str(n)
-     
         for idx,el in  enumerate([inv_mapping[x] for x in clus]):
-            print(el)
+            #print(el)
+
             ip = el.split('->')
             if '-' in ip[0]:
-                classname = el.split('-')[0]
+                classname = el.split('-')[1]
             else: 
                 classname = el.split('.pcap')[0]
-            
+            ## TODO: Overriding this FOR NOW!!!
+            '''for cdx, cc in enumerate(classes):
+                if cc in el:
+                    classname = cc
+                    break'''
             filename = el.split('.pcap')[0]
             #print(str(n)+","+ip[0]+","+ip[1]+","+str(final_probs[n][idx])+","+str(mapping[el])+"\n")
             outfile.write(str(n)+","+str(mapping[el])+","+str(final_probs[n][idx])+","+str(classname)+","+str(filename)+","+ip[0]+","+ip[1]+"\n")
     outfile.close()
+
     # Making tree
     print('Producing DAG with relationships between pcaps')
     clusters = {}
@@ -590,40 +611,39 @@ def connlevel_sequence(metadata, mapping):
                 if line[4] not in clusters.keys():
                     clusters[line[4]] = []
                 clusters[line[4]].append((line[3],line[0])) # classname, cluster#
-    print(clusters)
+    #print(clusters)
     f1.close()
     array = [str(x) for x in range(numclus-1)]
     array.append("-1")
+    
     treeprep = dict()
     for filename,val in clusters.items():
+        arr = [0]*numclus
         for fam, clus in val:
-
-            arr = [0]*numclus
-          
             ind = array.index(clus)
-            
             arr[ind] = 1
-            
-            mas = ''.join([str(x) for x in arr[:-1]])
-            famname = fam 
-            print(filename + "\t"+ fam+"\t"+''.join([str(x) for x in arr[:-1]]))
-            if mas not in treeprep.keys():
-                treeprep[mas] = dict()
-            if famname not in treeprep[mas].keys():
-                treeprep[mas][famname] = set()
-            treeprep[mas][famname].add(str(filename))
+        #print(filename, )    
+        mas = ''.join([str(x) for x in arr[:-1]])
+        famname = fam 
+        print(filename + "\t"+ fam+"\t"+''.join([str(x) for x in arr[:-1]]))
+        if mas not in treeprep.keys():
+            treeprep[mas] = dict()
+        if famname not in treeprep[mas].keys():
+            treeprep[mas][famname] = set()
+        treeprep[mas][famname].add(str(filename))
 
     f2 = open('mas-details'+addition+'.csv', 'w')
     for k,v in treeprep.items():
         for kv,vv in v.items():
-            print(k, str(kv), (vv))
+            #print(k, str(kv), (vv))
             f2.write(str(k)+';'+str(kv)+';'+str(len(vv))+'\n')
     f2.close()
 
     with open('mas-details'+addition+'.csv', 'rU') as f3:
         csv_reader = csv.reader(f3, delimiter=';')
-
+        
         graph = {}
+        
         names ={}
         for line in csv_reader:
             graph[line[0]] = set()
@@ -631,20 +651,27 @@ def connlevel_sequence(metadata, mapping):
                 names[line[0]] = []
             names[line[0]].append(line[1]+"("+line[2]+")")
 
+        zeros = ''.join(['0']*(numclus-1))
+        if zeros not in graph.keys():
+            graph[zeros] = set()
+		
         ulist = graph.keys()
-        print(len(ulist))
+        #print(len(ulist), ulist)
         covered = set()
         next = deque()
 
-        zeros = ''.join(['0']*(numclus-1))
+        
 
         specials  = []
     
         next.append(zeros)
+        
         while(len(next)>0):
+            #print(graph)
             l1 = next.popleft()
             covered.add(l1)
             for l2 in ulist:
+                #print(l1, l2, difference(l1,l2))
                 if l2 not in covered and difference(l1,l2) == 1:                  
                     graph[l1].add(l2)
                 
@@ -662,8 +689,8 @@ def connlevel_sequence(metadata, mapping):
         notmain = [x for _,x in sorted(zip(nums,notmain))]
 
         specials = notmain
-        print(notmain)
-        print(len(notmain))
+        #print(notmain)
+        #print(len(notmain))
 
 
 
@@ -720,11 +747,11 @@ def connlevel_sequence(metadata, mapping):
                     name+=l+',\n'
                 #print(str(idx) + " [label=\""+str(num)+"\"]")
                 if idx not in specials:
-                    print(str(idx) + " [label=\""+name+"\"]")
+                    #print(str(idx) + " [label=\""+name+"\"]")
                     text = str(idx) + " [label=\""+name+"\" , shape=box;]"
-                else:
-                    print(str(idx) + " [style=\"filled\" fillcolor=\"red\" label=\""+name+"\"]")
-                    text = str(idx) + " [style=\"filled\" shape=box, fillcolor=\"red\" label=\""+name+"\"]"
+                else: # treat in a special way. For now, leaving intact
+                    #print(str(idx) + " [style=\"filled\" fillcolor=\"red\" label=\""+name+"\"]")
+                    text = str(idx) + " [shape=box label=\""+name+"\"]"
 
                 f2.write(text)
                 f2.write('\n')
@@ -732,7 +759,7 @@ def connlevel_sequence(metadata, mapping):
                 for vi in v:
                     f2.write(str(k)+"->"+str(vi))
                     f2.write('\n')
-                    print(k+"->"+vi)
+                    #print(k+"->"+vi)
             f2.write("}")
             f2.close()
         # Rendering DAG
@@ -772,8 +799,8 @@ def connlevel_sequence(metadata, mapping):
         #if li[0] == '-1':
         #    continue
         
-        srcip = li[3]
-        dstip = li[4][:-1]
+        srcip = li[5]
+        dstip = li[6][:-1]
         has = int(li[1])
         
         name = str('%12s->%12s' % (srcip,dstip))
@@ -851,6 +878,7 @@ bytes, gap_list = [], []
 
 
 def readpcap(filename):
+    print("Reading", os.path.basename(filename))
     mal = 0
     ben = 0 
     tot = 0
