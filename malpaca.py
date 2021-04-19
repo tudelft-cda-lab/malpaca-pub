@@ -51,21 +51,11 @@ if RPY2:
 def connlevel_sequence(metadata, mapping):
 	inv_mapping = {v: k for k, v in mapping.items()}
 	data = metadata
-	timing = {}
 
 	values = list(data.values())
 	keys = list(data.keys())
-	distm = []
 	labels = []
 	ipmapping = []
-	'''for i,v in data.items():
-		fig = plt.figure(figsize=(10.0,9.0))
-		ax = fig.add_subplot(111)
-		ax.set_title(i)
-		plt.plot([x[1] for x in v][:75], 'b')
-		plt.plot([x[1] for x in v][:75], 'b.')
-		cid = keys.index(i)
-		plt.savefig('unzipped/malevol/data/connections/'+str(cid)+'.png')'''
 
 	# save intermediate results
 
@@ -78,7 +68,6 @@ def connlevel_sequence(metadata, mapping):
 
 		packageNames = ('IncDTW', 'rx2')
 		utils = rpackages.importr('utils')
-		base = rpackages.importr('base')
 		utils.chooseCRANmirror(ind=1)
 		to_install = [x for x in packageNames if not rpackages.isinstalled(x)]
 		for x in to_install:
@@ -118,22 +107,15 @@ def connlevel_sequence(metadata, mapping):
 			for i in range(len(values)):
 				labels.append(mapping[keys[i]])
 				ipmapping.append((mapping[keys[i]], inv_mapping[mapping[keys[i]]]))
-
-				# f.write("%s\n" % [x[1] for x in values[i]][:thresh])
-				# arr = [x[1] for x in values[i]][:thresh]
-				# arr = [int(x) for x in arr]
 				bytes.append("%s\n" % [x[1] for x in values[i]][:thresh])
 
-			# data = r['readLines'](orig_filename)
 			bytes = r['gsub']("\\[|\\]", "", bytes)
 			fun = r('function(x) as.numeric(unlist(strsplit(x, "\\\\,")))')
 			bytes = r['lapply'](bytes, fun)
-			# print(bytes)
 			args = {'lot': bytes, 'dist_method': 'norm2', 'step_pattern': 'symmetric1', 'normalize': False,
 					'ws': robjects.NULL, 'threshold': robjects.NULL, 'return_matrix': True, 'ncores': robjects.NULL,
 					'useRcppParallel': True}
 			bytesdistance = dtw.dtw_dismat(**args)
-			# print(bytesdistance.rx2('dismat'))
 			bytes = bytesdistance.rx2('dismat')
 
 			distm = []
@@ -143,7 +125,6 @@ def connlevel_sequence(metadata, mapping):
 				if (i + 1) % len(values) == 0:
 					distm.append(vals)
 					vals = []
-		# print(vals, distm)
 
 		else:
 			print("starting bytes dist")
@@ -151,9 +132,7 @@ def connlevel_sequence(metadata, mapping):
 			distm = [-1] * len(data.values())
 			distm = [[-1] * len(data.values()) for i in distm]
 
-			for a in range(len(data.values())):  # range(10):
-				# distm.append([])
-
+			for a in range(len(data.values())):
 				labels.append(mapping[keys[a]])
 				ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
 				for b in range(len(data.values())):
@@ -170,7 +149,7 @@ def connlevel_sequence(metadata, mapping):
 						distm[b][a] = dist
 
 		with open(filename, 'w') as outfile:
-			for a in range(len(distm)):  # len(data.values())): #range(10):
+			for a in range(len(distm)):
 				outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 		with open('labels' + addition + '.txt', 'w') as outfile:
 			outfile.write(' '.join([str(l) for l in labels]) + '\n')
@@ -216,12 +195,10 @@ def connlevel_sequence(metadata, mapping):
 			gaps = r['gsub']("\\[|\\]", "", gaps)
 			fun = r('function(x) as.numeric(unlist(strsplit(x, "\\\\,")))')
 			gaps = r['lapply'](gaps, fun)
-			# print(gaps)
 			args = {'lot': gaps, 'dist_method': 'norm2', 'step_pattern': 'symmetric1', 'normalize': False,
 					'ws': robjects.NULL, 'threshold': robjects.NULL, 'return_matrix': True, 'ncores': robjects.NULL,
 					'useRcppParallel': True}
 			gapsdistance = dtw.dtw_dismat(**args)
-			# print(gapsdistance.rx2('dismat'))
 			gaps = gapsdistance.rx2('dismat')
 			distm = []
 			vals = []
@@ -230,15 +207,12 @@ def connlevel_sequence(metadata, mapping):
 				if (i + 1) % len(values) == 0:
 					distm.append(vals)
 					vals = []
-		# print(vals, distm)
 		else:
 			print("starting gaps dist")
 			distm = [-1] * len(data.values())
 			distm = [[-1] * len(data.values()) for i in distm]
 
-			for a in range(len(data.values())):  # range(10):
-				# distm.append([])
-
+			for a in range(len(data.values())):
 				for b in range(len(data.values())):
 
 					i = [x[0] for x in values[a]][:thresh]
@@ -252,11 +226,9 @@ def connlevel_sequence(metadata, mapping):
 						dist, path = fastdtw(i, j, dist=euclidean)
 						distm[a][b] = dist
 						distm[b][a] = dist
-		# print 'len(A): '+ str(len(i)) + ' len(B): ' + str(len(j)) + ' dtw: ' + str(dist)
 
 		with open(filename, 'w') as outfile:
-			for a in range(len(distm)):  # len(data.values())): #range(10):
-				# print distm[a]
+			for a in range(len(distm)):
 				outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
 	endg = time.time()
@@ -265,7 +237,7 @@ def connlevel_sequence(metadata, mapping):
 	mini = min(min(distm))
 	maxi = max(max(distm))
 
-	for a in range(len(distm)):  # len(data.values())): #range(10):
+	for a in range(len(distm)):
 		ndistmG.append([])
 		for b in range(len(distm)):
 			normed = (distm[a][b] - mini) / (maxi - mini)
@@ -305,7 +277,6 @@ def connlevel_sequence(metadata, mapping):
 
 			dat = [x[3] for x in values[a]][:thresh]
 
-			# ngrams.append(zip(dat, dat[1:], dat[2:]))
 			li = zip(dat, dat[1:], dat[2:])
 			for b in li:
 				if b not in profile.keys():
@@ -315,16 +286,9 @@ def connlevel_sequence(metadata, mapping):
 
 			ngrams.append(profile)
 
-		# print ngrams[0]
-		profiles = []
-		# update for arrays
-
 		assert len(ngrams) == len(values)
 		for a in range(len(ngrams)):
-			# distm.append([])
-			# labels.append(mapping[keys[a]])
 			for b in range(len(ngrams)):
-
 				i = ngrams[a]
 				j = ngrams[b]
 				ngram_all = list(set(i.keys()) | set(j.keys()))
@@ -340,24 +304,16 @@ def connlevel_sequence(metadata, mapping):
 					distm[b][a] = dist
 
 		with open(filename, 'w') as outfile:
-			for a in range(len(distm)):  # len(data.values())): #range(10):
+			for a in range(len(distm)):
 				# print distm[a]
 				outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
 	ends = time.time()
 	print('sport ', (ends - starts))
 
-	# mini = min(min(distm))
-	# maxi = max(max(distm))
-	# print mini
-	# print maxi
-	# print "effective connections " + str(len(distm[0]))
-	# print "effective connections  " + str(len(distm))
-
-	for a in range(len(distm)):  # len(data.values())): #range(10):
+	for a in range(len(distm)):
 		ndistmS.append([])
 		for b in range(len(distm)):
-			# normed = (distm[a][b] - mini) / (maxi-mini)
 			ndistmS[a].append(distm[a][b])
 
 	# dest port
@@ -417,44 +373,32 @@ def connlevel_sequence(metadata, mapping):
 					distm[b][a] = dist
 
 		with open(filename, 'w') as outfile:
-			for a in range(len(distm)):  # len(data.values())): #range(10):
-				# print distm[a]
+			for a in range(len(distm)):
 				outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
 	endd = time.time()
 	print('time dport ', (endd - startd))
-	mini = min(min(distm))
-	maxi = max(max(distm))
-	# print mini
-	# print maxi
-	for a in range(len(distm)):  # len(data.values())): #range(10):
+
+	for a in range(len(distm)):
 		ndistmD.append([])
 		for b in range(len(distm)):
-			# normed = (distm[a][b] - mini) / (maxi-mini)
 			ndistmD[a].append(distm[a][b])
 
 	ndistm = []
 
-	for a in range(len(ndistmS)):  # len(data.values())): #range(10):
-
+	for a in range(len(ndistmS)):
 		ndistm.append([])
 		for b in range(len(ndistmS)):
 			ndistm[a].append((ndistmB[a][b] + ndistmG[a][b] + ndistmD[a][b] + ndistmS[a][b]) / 4.0)
-	# print "a: " + str(mapping[keys[a]]) + " b: " + str(mapping[keys[b]]) + " dist: " + str(ndistm[a][b])
-
-	# print ndistm[len(ndistm)-1]
 
 	print("done distance meaurement")
 	print(len(ndistm))
 	print(len(ndistm[0]))
-	# print "effective number of connections: " + str(len(dist))
 
-	plot_kwds = {'alpha': 0.5, 's': 80, 'linewidths': 0}
 	RS = 3072018
 	projection = TSNE(random_state=RS).fit_transform(ndistm)
 	plt.scatter(*projection.T)
 	plt.savefig("tsne-result" + addition)
-	# plt.show()
 
 	size = 7
 	sample = 7
@@ -463,7 +407,6 @@ def connlevel_sequence(metadata, mapping):
 							metric='precomputed')
 	clu = model.fit(np.array([np.array(x) for x in ndistm]))  # final for citadel and dridex
 	joblib.dump(clu, 'model' + addition + '.pkl')
-	# print "size: " + str(size) + "sample: " + str(sample)+ " silhouette: " +  str(silhouette_score(ndistm, clu.labels_, metric='precomputed'))
 
 	print("num clusters: " + str(len(set(clu.labels_)) - 1))
 
@@ -473,15 +416,11 @@ def connlevel_sequence(metadata, mapping):
 			avg += sum([(1 if x == l else 0) for x in clu.labels_])
 	print("avergae size of cluster:" + str(float(avg) / float(len(set(clu.labels_)) - 1)))
 	print("samples in noise: " + str(sum([(1 if x == -1 else 0) for x in clu.labels_])))
-	# clu.single_linkage_tree_.plot(cmap='viridis', colorbar=True)
-	# plt.show()
-	# clu.condensed_tree_.plot(select_clusters=True, selection_palette=sns.color_palette())
-	# plt.show()
 
 	cols = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
 			'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
 			'maroon', 'deepskyblue', 'silver']
-	pal = sns.color_palette(cols)  #
+	pal = sns.color_palette(cols)
 
 	extra_cols = len(set(clu.labels_)) - 18
 
@@ -490,16 +429,11 @@ def connlevel_sequence(metadata, mapping):
 	col = [pal[x] for x in clu.labels_]
 	assert len(clu.labels_) == len(ndistm)
 
-	mem_col = [sns.desaturate(x, p) for x, p in zip(col, clu.probabilities_)]
-
 	plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.2)
 
-	# classes = ['Alexa', 'Hue', 'Somfy', 'malware']
-	# print([(x, col[i]) for i,x in enumerate(classes)])
-	for i, txt in enumerate(clu.labels_):  # mapping.keys()): #zip([x[:1] for x in mapping.keys()],clu.labels_)):
+	for i, txt in enumerate(clu.labels_):
 
 		realind = labels[i]
-		name = inv_mapping[realind]
 		'''thiscol = None
 		thislab = None
 		for cdx, cc in enumerate(classes):
@@ -512,11 +446,8 @@ def connlevel_sequence(metadata, mapping):
 			continue
 
 		plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], alpha=0.6)
-	# plt.scatter(projection.T[0][i],projection.T[1][i], color=col[i], alpha=0.6)
-	# plt.annotate(thislab, (projection.T[0][i],projection.T[1][i]), color=thiscol, alpha=0.2)
 
 	plt.savefig("clustering-result" + addition)
-	# plt.show()
 
 	# writing csv file
 	print("writing csv file")
@@ -534,22 +465,16 @@ def connlevel_sequence(metadata, mapping):
 
 	for n, clus in final_clusters.items():
 
-		# print "cluster numbeR: " + str(n)
 		for idx, el in enumerate([inv_mapping[x] for x in clus]):
-			# print(el)
 
 			ip = el.split('->')
 			if '-' in ip[0]:
 				classname = el.split('-')[1]
 			else:
 				classname = el.split('.pcap')[0]
-			## TODO: Overriding this FOR NOW!!!
-			'''for cdx, cc in enumerate(classes):
-				if cc in el:
-					classname = cc
-					break'''
+
 			filename = el.split('.pcap')[0]
-			# print(str(n)+","+ip[0]+","+ip[1]+","+str(final_probs[n][idx])+","+str(mapping[el])+"\n")
+
 			outfile.write(
 				str(n) + "," + str(mapping[el]) + "," + str(final_probs[n][idx]) + "," + str(classname) + "," + str(
 					filename) + "," + ip[0] + "," + ip[1] + "\n")
@@ -561,12 +486,11 @@ def connlevel_sequence(metadata, mapping):
 	numclus = len(set(clu.labels_))
 	with open(csv_file, 'r') as f1:
 		reader = csv.reader(f1, delimiter=',')
-		for i, line in enumerate(reader):  # f1.readlines()[1:]:
+		for i, line in enumerate(reader):
 			if i > 0:
 				if line[4] not in clusters.keys():
 					clusters[line[4]] = []
 				clusters[line[4]].append((line[3], line[0]))  # classname, cluster#
-	# print(clusters)
 	f1.close()
 	array = [str(x) for x in range(numclus - 1)]
 	array.append("-1")
@@ -577,7 +501,6 @@ def connlevel_sequence(metadata, mapping):
 		for fam, clus in val:
 			ind = array.index(clus)
 			arr[ind] = 1
-		# print(filename, )
 		mas = ''.join([str(x) for x in arr[:-1]])
 		famname = fam
 		print(filename + "\t" + fam + "\t" + ''.join([str(x) for x in arr[:-1]]))
@@ -590,7 +513,6 @@ def connlevel_sequence(metadata, mapping):
 	with open('mas-details' + addition + '.csv', 'w') as f2:
 		for k, v in treeprep.items():
 			for kv, vv in v.items():
-				# print(k, str(kv), (vv))
 				f2.write(str(k) + ';' + str(kv) + ';' + str(len(vv)) + '\n')
 
 	with open('mas-details' + addition + '.csv', 'r') as f3:
@@ -610,27 +532,21 @@ def connlevel_sequence(metadata, mapping):
 			graph[zeros] = set()
 
 		ulist = graph.keys()
-		# print(len(ulist), ulist)
 		covered = set()
 		next = deque()
-
-		specials = []
 
 		next.append(zeros)
 
 		while (len(next) > 0):
-			# print(graph)
 			l1 = next.popleft()
 			covered.add(l1)
 			for l2 in ulist:
-				# print(l1, l2, difference(l1,l2))
 				if l2 not in covered and difference(l1, l2) == 1:
 					graph[l1].add(l2)
 
 					if l2 not in next:
 						next.append(l2)
 
-		# keys = graph.keys()
 		val = set()
 		for v in graph.values():
 			val.update(v)
@@ -641,8 +557,6 @@ def connlevel_sequence(metadata, mapping):
 		notmain = [x for _, x in sorted(zip(nums, notmain))]
 
 		specials = notmain
-		# print(notmain)
-		# print(len(notmain))
 
 		extras = set()
 
@@ -652,7 +566,7 @@ def connlevel_sequence(metadata, mapping):
 			comp.update(extras)
 
 			mindist = 1000
-			minli1, minli2 = None, None
+
 			for l in comp:
 				if nm != l:
 					diff = difference(nm, l)
@@ -661,11 +575,9 @@ def connlevel_sequence(metadata, mapping):
 						minli = l
 
 			diffbase = difference(nm, zeros)
-			# print('diffs', nm, 'extra', mindist, 'with root', diffbase)
+
 			if diffbase <= mindist:
-				mindist = diffbase
 				minli = zeros
-			# print('replaced')
 
 			num1 = sum([int(s) for s in nm])
 			num2 = sum([int(s) for s in minli])
@@ -676,27 +588,20 @@ def connlevel_sequence(metadata, mapping):
 
 			extras.add(nm)
 
-		# keys = graph.keys()
 		val = set()
 		for v in graph.values():
 			val.update(v)
 			f2 = open('relation-tree' + addition + '.dot', 'w')
 			f2.write("digraph dag {\n")
 			f2.write("rankdir=LR;\n")
-			num = 0
 			for idx, li in names.items():
-				text = ''
-				# print(idx)
 				name = str(idx) + '\n'
 
 				for l in li:
 					name += l + ',\n'
-				# print(str(idx) + " [label=\""+str(num)+"\"]")
 				if idx not in specials:
-					# print(str(idx) + " [label=\""+name+"\"]")
 					text = str(idx) + " [label=\"" + name + "\" , shape=box;]"
 				else:  # treat in a special way. For now, leaving intact
-					# print(str(idx) + " [style=\"filled\" fillcolor=\"red\" label=\""+name+"\"]")
 					text = str(idx) + " [shape=box label=\"" + name + "\"]"
 
 				f2.write(text)
@@ -705,7 +610,6 @@ def connlevel_sequence(metadata, mapping):
 				for vi in v:
 					f2.write(str(k) + "->" + str(vi))
 					f2.write('\n')
-			# print(k+"->"+vi)
 			f2.write("}")
 			f2.close()
 		# Rendering DAG
@@ -717,10 +621,8 @@ def connlevel_sequence(metadata, mapping):
 			print('Failed')
 			pass
 
-	# temporal heatmaps start
-
 	print("writing temporal heatmaps")
-	# print("prob: ", clu.probabilities_)
+
 	if not os.path.exists('figs' + addition + '/'):
 		os.mkdir('figs' + addition + '/')
 		os.mkdir('figs' + addition + '/bytes')
@@ -729,19 +631,15 @@ def connlevel_sequence(metadata, mapping):
 		os.mkdir('figs' + addition + '/dport')
 
 	actlabels = []
-	for a in range(len(values)):  # range(10):
+	for a in range(len(values)):
 		actlabels.append(mapping[keys[a]])
 
 	clusterinfo = {}
 	seqclufile = csv_file
-	lines = []
 	lines = open(seqclufile).readlines()[1:]
 
 	for line in lines:
 		li = line.split(",")  # clusnum, connnum, prob, srcip, dstip
-		# if li[0] == '-1':
-		#    continue
-
 		srcip = li[5]
 		dstip = li[6][:-1]
 		has = int(li[1])
@@ -757,7 +655,6 @@ def connlevel_sequence(metadata, mapping):
 	for names, sname, q in [("Packet sizes", "bytes", 1), ("Interval", "gaps", 0), ("Source Port", "sport", 2),
 							("Dest. Port", "dport", 3)]:
 		for clusnum, cluster in clusterinfo.items():
-			items = [int(x[0]) for x in cluster]
 			labels = [x[1] for x in cluster]
 
 			acha = [actlabels.index(int(x[0])) for x in cluster]
@@ -771,24 +668,19 @@ def connlevel_sequence(metadata, mapping):
 
 			df = pd.DataFrame(dataf, index=labels)
 
-			g = sns.clustermap(df, xticklabels=False, col_cluster=False)  # , vmin= minb, vmax=maxb)
+			g = sns.clustermap(df, xticklabels=False, col_cluster=False)
 			ind = g.dendrogram_row.reordered_ind
 			fig = plt.figure(figsize=(10.0, 9.0))
 			plt.suptitle("Exp: " + expname + " | Cluster: " + clusnum + " | Feature: " + names)
-			ax = fig.add_subplot(111)
-			datanew = []
 			labelsnew = []
 			lol = []
 			for it in ind:
 				labelsnew.append(labels[it])
-				# print labels[it]
 
-				# print cluster[[x[1] for x in cluster].index(labels[it])][0]
 				lol.append(cluster[[x[1] for x in cluster].index(labels[it])][0])
-			# print len(labelsnew)
-			# print len(lol)
+
 			acha = [actlabels.index(int(x)) for x in lol]
-			# print acha
+
 			blah = [values[a] for a in acha]
 
 			dataf = []
@@ -824,39 +716,23 @@ bytes, gap_list = [], []
 
 def readpcap(filename):
 	print("Reading", os.path.basename(filename))
-	mal = 0
-	ben = 0
-	tot = 0
 	counter = 0
-	ipcounter = 0
-	tcpcounter = 0
-	udpcounter = 0
 
-	data = []
 	connections = {}
-	packetspersecond = []
-	bytesperhost = {}
-	count = 0
 	prev = -1
-	bytespersec = 0
 	gaps = []
-	incoming = []
-	outgoing = []
-	period = 0
 	bla = 0
 	with open(filename, 'rb') as f:
 		pcap = dpkt.pcap.Reader(f)
 		for ts, pkt in pcap:
-			# try:
 			timestamp = (datetime.datetime.utcfromtimestamp(ts))
 			gap = 0.0 if prev == -1 else round(float((timestamp - prev).microseconds) / float(1000), 3)
-			# print gap
+
 			if prev == -1:
-				period = timestamp
+				pass
 
 			prev = timestamp
 			counter += 1
-			eth = None
 			bla += 1
 			try:
 				eth = dpkt.ethernet.Ethernet(pkt)
@@ -874,7 +750,6 @@ def readpcap(filename):
 
 			src_ip = inet_to_str(ip.src)
 			dst_ip = inet_to_str(ip.dst)
-			# print(src_ip, dst_ip)
 			sport = 0
 			dport = 0
 			try:
@@ -890,7 +765,6 @@ def readpcap(filename):
 
 		print(os.path.basename(filename), " num connections: ", len(connections))
 
-		values = []
 		todel = []
 		print('Before cleanup: Total packets: ', len(gaps), ' in ', len(connections), ' connections.')
 		for i, v in connections.items():  # clean it up
@@ -912,7 +786,7 @@ def readfolder():
 	files = glob.glob(sys.argv[2] + "/*.pcap")
 	print('About to read pcap...')
 	for f in files:
-		key = os.path.basename(f)  # [:-5].split('-')
+		key = os.path.basename(f)
 
 		data, connections = (readpcap(f))
 		if len(connections.items()) < 1:
@@ -921,7 +795,6 @@ def readfolder():
 		for i, v in connections.items():
 			name = key + i[0] + "->" + i[1]
 			print(name)
-			# name = meta[key[len(key)-1]]['threat']+"|" +key[len(key)-1][:5]+"|"+i[0]+"->"+i[1]
 			mapping[name] = fno
 			fno += 1
 			meta[name] = v
@@ -950,23 +823,16 @@ def readfile():
 	print('file reading ', (endf - startf))
 	fno = 0
 	meta = {}
-	nconnections = {}
 	print("Average conn length: ", np.mean([len(x) for i, x in connections.items()]))
 	print("Minimum conn length: ", np.min([len(x) for i, x in connections.items()]))
 	print("Maximum conn length: ", np.max([len(x) for i, x in connections.items()]))
-	# print("num connections survived ", len(connections))
-	# print(sum([1 for i,x in connections.items() if len(x)>=50]))
+
 	for i, v in connections.items():
 		name = i[0] + "->" + i[1]
 		mapping[name] = fno
 		fno += 1
 		meta[name] = v
 
-	# fig = plt.figure()
-	# plt.title(''+name)
-	# plt.plot([x[0] for x in v], 'r')
-	# plt.plot([x[0] for x in v], 'r.')
-	# plt.savefig('figs/'+str(mapping[name])+'.png')
 	print('Surviving connections ', len(meta))
 	startc = time.time()
 	connlevel_sequence(meta, mapping)
