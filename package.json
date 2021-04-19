@@ -4,6 +4,7 @@
   "description": "This repo contains the implementation of MalPaCA (Malware Packet-sequence Clustering and Analysis).",
   "main": "malpaca.py",
   "scripts": {
+    "install": "pip install -r requirements.txt",
     "cleanup": "rm -rf output",
     "start": "npm run cleanup & python malpaca.py folder data data & npm run moveOutput",
     "moveOutput": "mkdir output && mv *-data-20* output",
