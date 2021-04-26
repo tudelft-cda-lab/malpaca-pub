@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from dpkt.ip import IP_PROTO_TCP, IP_PROTO_UDP
+from dpkt.arp import ARP
 from fastdtw import fastdtw
 from scipy.spatial.distance import cosine, euclidean
 from sklearn.manifold import TSNE
@@ -39,15 +39,6 @@ thresh = 20
 if len(sys.argv) > 4:
     thresh = int(sys.argv[4])
 
-RPY2 = False
-if len(sys.argv) > 5:
-    RPY2 = bool(sys.argv[5])
-
-if RPY2:
-    import rpy2.robjects as robjects
-    import rpy2.robjects.packages as rpackages
-
-
 # @profile
 def connlevel_sequence(metadata, mapping):
     inv_mapping = {v: k for k, v in mapping.items()}
@@ -65,16 +56,6 @@ def connlevel_sequence(metadata, mapping):
     # ----- start porting -------
 
     utils, r = None, None
-    if RPY2:
-
-        packageNames = ('IncDTW', 'rx2')
-        utils = rpackages.importr('utils')
-        utils.chooseCRANmirror(ind=1)
-        to_install = [x for x in packageNames if not rpackages.isinstalled(x)]
-        for x in to_install:
-            utils.install_packages(x)
-        dtw = rpackages.importr('IncDTW')
-        r = robjects.r
 
     for n, feat in [(1, 'bytes'), (0, 'gaps'), (2, 'sport'), (3, 'dport')]:
         f = open(feat + '-features' + addition, 'w')
@@ -87,75 +68,35 @@ def connlevel_sequence(metadata, mapping):
     startb = time.time()
 
     filename = 'bytesDist' + addition + '.txt'
-    if os.path.exists(filename):
-        distm = []
-        linecount = 0
-        for line in open(filename, 'r').readlines():
-            distm.append([])
-            ele = line.split(" ")
-            for e in ele:
-                distm[linecount].append(float(e))
-            linecount += 1
 
-        for line in open('labels' + addition + '.txt', 'r').readlines():
-            labels = [int(e) for e in line.split(' ')]
+    print("starting bytes dist")
 
-        print("found bytes.txt")
+    distm = [-1] * len(data.values())
+    distm = [[-1] * len(data.values()) for i in distm]
 
-    else:
-        if RPY2:
-            bytes = []
-            for i in range(len(values)):
-                labels.append(mapping[keys[i]])
-                ipmapping.append((mapping[keys[i]], inv_mapping[mapping[keys[i]]]))
-                bytes.append("%s\n" % [x[1] for x in values[i]][:thresh])
+    for a in range(len(data.values())):
+        labels.append(mapping[keys[a]])
+        ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
+        for b in range(len(data.values())):
 
-            bytes = r['gsub']("\\[|\\]", "", bytes)
-            fun = r('function(x) as.numeric(unlist(strsplit(x, "\\\\,")))')
-            bytes = r['lapply'](bytes, fun)
-            args = {'lot': bytes, 'dist_method': 'norm2', 'step_pattern': 'symmetric1', 'normalize': False,
-                    'ws': robjects.NULL, 'threshold': robjects.NULL, 'return_matrix': True, 'ncores': robjects.NULL,
-                    'useRcppParallel': True}
-            bytesdistance = dtw.dtw_dismat(**args)
-            bytes = bytesdistance.rx2('dismat')
+            i = [x[1] for x in values[a]][:thresh]
+            j = [x[1] for x in values[b]][:thresh]
+            if len(i) == 0 or len(j) == 0: continue
 
-            distm = []
-            vals = []
-            for i in range(len(bytes)):
-                vals.append(bytes[i])
-                if (i + 1) % len(values) == 0:
-                    distm.append(vals)
-                    vals = []
+            if a == b:
+                distm[a][b] = 0.0
+            elif b > a:
+                dist, path = fastdtw(i, j, dist=euclidean)
+                distm[a][b] = dist
+                distm[b][a] = dist
 
-        else:
-            print("starting bytes dist")
-
-            distm = [-1] * len(data.values())
-            distm = [[-1] * len(data.values()) for i in distm]
-
-            for a in range(len(data.values())):
-                labels.append(mapping[keys[a]])
-                ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
-                for b in range(len(data.values())):
-
-                    i = [x[1] for x in values[a]][:thresh]
-                    j = [x[1] for x in values[b]][:thresh]
-                    if len(i) == 0 or len(j) == 0: continue
-
-                    if a == b:
-                        distm[a][b] = 0.0
-                    elif b > a:
-                        dist, path = fastdtw(i, j, dist=euclidean)
-                        distm[a][b] = dist
-                        distm[b][a] = dist
-
-        with open(filename, 'w') as outfile:
-            for a in range(len(distm)):
-                outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-        with open('labels' + addition + '.txt', 'w') as outfile:
-            outfile.write(' '.join([str(l) for l in labels]) + '\n')
-        with open('mapping' + addition + '.txt', 'w') as outfile:
-            outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    with open('labels' + addition + '.txt', 'w') as outfile:
+        outfile.write(' '.join([str(l) for l in labels]) + '\n')
+    with open('mapping' + addition + '.txt', 'w') as outfile:
+        outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
     endb = time.time()
     print('bytes ', (endb - startb))
     ndistmB = []
@@ -172,65 +113,29 @@ def connlevel_sequence(metadata, mapping):
     distm = []
 
     filename = 'gapsDist' + addition + '.txt'
-    if os.path.exists(filename):
 
-        linecount = 0
-        for line in open(filename, 'r').readlines():
-            distm.append([])
-            ele = line.split(" ")
-            for e in ele:
-                try:
-                    distm[linecount].append(float(e))
-                except:
-                    print("error on: " + e)
-            linecount += 1
+    print("starting gaps dist")
+    distm = [-1] * len(data.values())
+    distm = [[-1] * len(data.values()) for i in distm]
 
-        # print distm
-        print("found gaps.txt")
-    else:
-        if RPY2:
-            gaps = []
-            for i in range(len(values)):
-                gaps.append("%s\n" % [x[0] for x in values[i]][:thresh])
+    for a in range(len(data.values())):
+        for b in range(len(data.values())):
 
-            gaps = r['gsub']("\\[|\\]", "", gaps)
-            fun = r('function(x) as.numeric(unlist(strsplit(x, "\\\\,")))')
-            gaps = r['lapply'](gaps, fun)
-            args = {'lot': gaps, 'dist_method': 'norm2', 'step_pattern': 'symmetric1', 'normalize': False,
-                    'ws': robjects.NULL, 'threshold': robjects.NULL, 'return_matrix': True, 'ncores': robjects.NULL,
-                    'useRcppParallel': True}
-            gapsdistance = dtw.dtw_dismat(**args)
-            gaps = gapsdistance.rx2('dismat')
-            distm = []
-            vals = []
-            for i in range(len(gaps)):
-                vals.append(gaps[i])
-                if (i + 1) % len(values) == 0:
-                    distm.append(vals)
-                    vals = []
-        else:
-            print("starting gaps dist")
-            distm = [-1] * len(data.values())
-            distm = [[-1] * len(data.values()) for i in distm]
+            i = [x[0] for x in values[a]][:thresh]
+            j = [x[0] for x in values[b]][:thresh]
 
-            for a in range(len(data.values())):
-                for b in range(len(data.values())):
+            if len(i) == 0 or len(j) == 0: continue
 
-                    i = [x[0] for x in values[a]][:thresh]
-                    j = [x[0] for x in values[b]][:thresh]
+            if a == b:
+                distm[a][b] = 0.0
+            elif b > a:
+                dist, path = fastdtw(i, j, dist=euclidean)
+                distm[a][b] = dist
+                distm[b][a] = dist
 
-                    if len(i) == 0 or len(j) == 0: continue
-
-                    if a == b:
-                        distm[a][b] = 0.0
-                    elif b > a:
-                        dist, path = fastdtw(i, j, dist=euclidean)
-                        distm[a][b] = dist
-                        distm[b][a] = dist
-
-        with open(filename, 'w') as outfile:
-            for a in range(len(distm)):
-                outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     endg = time.time()
     print('gaps ', (endg - startg))
@@ -252,61 +157,46 @@ def connlevel_sequence(metadata, mapping):
 
     filename = 'sportDist' + addition + '.txt'
 
-    if os.path.exists(filename):
-        linecount = 0
-        for line in open(filename, 'r').readlines():
-            distm.append([])
-            ele = line.split(" ")
-            for e in ele:
-                try:
-                    distm[linecount].append(float(e))
-                except:
-                    print("error on: " + e)
-            linecount += 1
+    print("starting sport dist")
+    distm = [-1] * len(data.values())
+    distm = [[-1] * len(data.values()) for i in distm]
 
-        # print distm
-        print("found sport.txt")
-    else:
-        print("starting sport dist")
-        distm = [-1] * len(data.values())
-        distm = [[-1] * len(data.values()) for i in distm]
+    ngrams = []
+    for a in range(len(values)):
+        profile = dict()
 
-        ngrams = []
-        for a in range(len(values)):
-            profile = dict()
+        dat = [x[3] for x in values[a]][:thresh]
 
-            dat = [x[3] for x in values[a]][:thresh]
+        li = zip(dat, dat[1:], dat[2:])
+        for b in li:
+            if b not in profile.keys():
+                profile[b] = 0
 
-            li = zip(dat, dat[1:], dat[2:])
-            for b in li:
-                if b not in profile.keys():
-                    profile[b] = 0
+            profile[b] += 1
 
-                profile[b] += 1
+        ngrams.append(profile)
 
-            ngrams.append(profile)
+    assert len(ngrams) == len(values)
+    for a in range(len(ngrams)):
+        for b in range(len(ngrams)):
+            i = ngrams[a]
+            j = ngrams[b]
+            ngram_all = list(set(i.keys()) | set(j.keys()))
+            i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
+            j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
 
-        assert len(ngrams) == len(values)
-        for a in range(len(ngrams)):
-            for b in range(len(ngrams)):
-                i = ngrams[a]
-                j = ngrams[b]
-                ngram_all = list(set(i.keys()) | set(j.keys()))
-                i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
-                j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
+            if a == b:
+                distm[a][b] = 0.0
+            elif b > a:
 
-                if a == b:
-                    distm[a][b] = 0.0
-                elif b > a:
+                dist = cosine(i_vec, j_vec)
+                distm[a][b] = dist
+                distm[b][a] = dist
 
-                    dist = cosine(i_vec, j_vec)
-                    distm[a][b] = dist
-                    distm[b][a] = dist
-
-        with open(filename, 'w') as outfile:
-            for a in range(len(distm)):
-                # print distm[a]
-                outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            # print distm[a]
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     ends = time.time()
     print('sport ', (ends - starts))
@@ -322,59 +212,42 @@ def connlevel_sequence(metadata, mapping):
 
     startd = time.time()
 
-    filename = 'dportDist' + addition + '.txt'
-    if os.path.exists(filename):
+    print("starting dport dist")
+    distm = [-1] * len(data.values())
+    distm = [[-1] * len(data.values()) for i in distm]
 
-        linecount = 0
-        for line in open(filename, 'r').readlines():
-            distm.append([])
-            ele = line.split(" ")
-            for e in ele:
-                try:
-                    distm[linecount].append(float(e))
-                except:
-                    print("error on: " + e)
-            linecount += 1
+    ngrams = []
+    for a in range(len(values)):
 
-        # print distm
-        print("found dport.txt")
-    else:
-        print("starting dport dist")
-        distm = [-1] * len(data.values())
-        distm = [[-1] * len(data.values()) for i in distm]
+        profile = dict()
+        dat = [x[4] for x in values[a]][:thresh]
 
-        ngrams = []
-        for a in range(len(values)):
+        li = zip(dat, dat[1:], dat[2:])
 
-            profile = dict()
-            dat = [x[4] for x in values[a]][:thresh]
+        for b in li:
+            if b not in profile.keys():
+                profile[b] = 0
+            profile[b] += 1
+        ngrams.append(profile)
 
-            li = zip(dat, dat[1:], dat[2:])
+    assert len(ngrams) == len(values)
+    for a in range(len(ngrams)):
+        for b in range(len(ngrams)):
+            if a == b:
+                distm[a][b] = 0.0
+            elif b > a:
+                i = ngrams[a]
+                j = ngrams[b]
+                ngram_all = list(set(i.keys()) | set(j.keys()))
+                i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
+                j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
+                dist = round(cosine(i_vec, j_vec), 8)
+                distm[a][b] = dist
+                distm[b][a] = dist
 
-            for b in li:
-                if b not in profile.keys():
-                    profile[b] = 0
-                profile[b] += 1
-            ngrams.append(profile)
-
-        assert len(ngrams) == len(values)
-        for a in range(len(ngrams)):
-            for b in range(len(ngrams)):
-                if a == b:
-                    distm[a][b] = 0.0
-                elif b > a:
-                    i = ngrams[a]
-                    j = ngrams[b]
-                    ngram_all = list(set(i.keys()) | set(j.keys()))
-                    i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
-                    j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
-                    dist = round(cosine(i_vec, j_vec), 8)
-                    distm[a][b] = dist
-                    distm[b][a] = dist
-
-        with open(filename, 'w') as outfile:
-            for a in range(len(distm)):
-                outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     endd = time.time()
     print('time dport ', (endd - startd))
@@ -399,6 +272,7 @@ def connlevel_sequence(metadata, mapping):
     projection = TSNE(random_state=RS).fit_transform(ndistm)
     plt.scatter(*projection.T)
     plt.savefig("tsne-result" + addition)
+    plt.close()
 
     size = 7
     sample = 7
@@ -432,15 +306,6 @@ def connlevel_sequence(metadata, mapping):
     plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.2)
 
     for i, txt in enumerate(clu.labels_):
-
-        realind = labels[i]
-        '''thiscol = None
-        thislab = None
-        for cdx, cc in enumerate(classes):
-            if cc in name:
-                thiscol = col[cdx]
-                thislab = cc
-                break'''
         plt.scatter(projection.T[0][i], projection.T[1][i], color=col[i], alpha=0.6)
         if txt == -1:
             continue
@@ -694,15 +559,7 @@ def connlevel_sequence(metadata, mapping):
             plt.savefig("figs" + addition + "/" + sname + "/" + clusnum)
 
 
-def inet_to_str(inet):
-    """
-    Convert inet object to a string
-        Args:
-            inet (inet struct): inet network address
-        Returns:
-            str: Printable/readable IP address
-    """
-    # First try ipv4 and then ipv6
+def inet_to_str(inet: bytes) -> str:
     try:
         return socket.inet_ntop(socket.AF_INET, inet)
     except ValueError:
@@ -725,8 +582,8 @@ def readpcap(filename):
     with open(filename, 'rb') as f:
         pcap = dpkt.pcap.Reader(f)
         for ts, pkt in pcap:
-            timestamp = (datetime.datetime.utcfromtimestamp(ts))
-            gap = 0.0 if prev == -1 else round(float((timestamp - prev).microseconds) / float(1000), 3)
+            timestamp = datetime.datetime.utcfromtimestamp(ts)
+            gap = 0.0 if prev == -1 else (timestamp - prev).microseconds / 1000
 
             if prev == -1:
                 pass
@@ -739,25 +596,36 @@ def readpcap(filename):
             except:
                 continue
 
-            if eth.type != dpkt.ethernet.ETH_TYPE_IP:
+            level3 = eth.data
+
+            if type(level3) is not dpkt.ip.IP:
                 continue
 
-            ip = eth.data
+            level4 = level3.data
 
-            gaps.append((gap, ip.len, ip.p))
+            gaps.append((gap, level3.len, level3.p))
 
-            src_ip = inet_to_str(ip.src)
-            dst_ip = inet_to_str(ip.dst)
+            src_ip = inet_to_str(level3.src)
+            dst_ip = inet_to_str(level3.dst)
 
-            if ip.p != IP_PROTO_TCP and ip.p != IP_PROTO_UDP:
-                continue
+            if type(level4) is dpkt.tcp.TCP:
+                source_port = level4.sport
+                destination_port = level4.dport
+            elif type(level4) is dpkt.udp.UDP:
+                source_port = level4.sport
+                destination_port = level4.dport
+            else:
+                source_port = 0
+                destination_port = 0
 
-            sport = ip.data.sport
-            dport = ip.data.dport
+            key = (src_ip, dst_ip)
+            flow_data = (gap, level3.len, level3.p, source_port, destination_port)
 
-            if (src_ip, dst_ip) not in connections.keys():
-                connections[(src_ip, dst_ip)] = []
-            connections[(src_ip, dst_ip)].append((gap, ip.len, ip.p, sport, dport))
+            if connections.get(key):
+                connections[key].append(flow_data)
+            else:
+                connections[key] = [flow_data]
+
 
         print(os.path.basename(filename), " num connections: ", len(connections))
 
