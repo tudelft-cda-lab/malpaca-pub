@@ -2,7 +2,6 @@
 
 import csv
 import datetime
-import dpkt
 import glob
 import os
 import socket
@@ -10,6 +9,7 @@ import sys
 import time
 from collections import deque
 
+import dpkt
 import hdbscan
 import joblib
 import matplotlib
@@ -17,19 +17,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from dpkt.arp import ARP
 from fastdtw import fastdtw
 from scipy.spatial.distance import cosine, euclidean
 from sklearn.manifold import TSNE
 
 plt.rcParams.update({'figure.max_open_warning': 0})
-
-
-def difference(str1, str2):
-    return sum([str1[x] != str2[x] for x in range(len(str1))])
-
-
-totalconn = 0
 
 expname = 'exp'
 if len(sys.argv) > 3:
@@ -39,23 +31,20 @@ thresh = 20
 if len(sys.argv) > 4:
     thresh = int(sys.argv[4])
 
+
 # @profile
 def connlevel_sequence(metadata, mapping):
-    inv_mapping = {v: k for k, v in mapping.items()}
     data = metadata
+    inv_mapping = {v: k for k, v in mapping.items()}
 
     values = list(data.values())
     keys = list(data.keys())
-    labels = []
-    ipmapping = []
 
     # save intermediate results
 
     addition = '-' + expname + '-' + str(thresh)
 
     # ----- start porting -------
-
-    utils, r = None, None
 
     for n, feat in [(1, 'bytes'), (0, 'gaps'), (2, 'sport'), (3, 'dport')]:
         f = open(feat + '-features' + addition, 'w')
@@ -65,444 +54,118 @@ def connlevel_sequence(metadata, mapping):
             f.write("\n")
         f.close()
 
-    startb = time.time()
+    labels, ndistmB = timeFunction(normalizedByteDistance.__name__, lambda: normalizedByteDistance(addition, mapping, inv_mapping, keys, values))
 
-    filename = 'bytesDist' + addition + '.txt'
+    ndistmG = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(addition, values))
 
-    print("starting bytes dist")
+    ndistmS = timeFunction(normalizedSourcePortDistance.__name__, lambda: normalizedSourcePortDistance(addition, values))
 
-    distm = [-1] * len(data.values())
-    distm = [[-1] * len(data.values()) for i in distm]
+    ndistmD = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(addition, values))
 
-    for a in range(len(data.values())):
-        labels.append(mapping[keys[a]])
-        ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
-        for b in range(len(data.values())):
+    ndistm = timeFunction(normalizedDistanceMeasurement.__name__, lambda: normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS))
 
-            i = [x[1] for x in values[a]][:thresh]
-            j = [x[1] for x in values[b]][:thresh]
-            if len(i) == 0 or len(j) == 0: continue
+    clu, projection = generateClusters(addition, ndistm)
 
-            if a == b:
-                distm[a][b] = 0.0
-            elif b > a:
-                dist, path = fastdtw(i, j, dist=euclidean)
-                distm[a][b] = dist
-                distm[b][a] = dist
+    generateClusterGraph(addition, ndistm, clu.labels_, projection)
 
-    with open(filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-    with open('labels' + addition + '.txt', 'w') as outfile:
-        outfile.write(' '.join([str(l) for l in labels]) + '\n')
-    with open('mapping' + addition + '.txt', 'w') as outfile:
-        outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
-    endb = time.time()
-    print('bytes ', (endb - startb))
-    ndistmB = []
-    mini = min(min(distm))
-    maxi = max(max(distm))
+    csv_file = 'clusters' + addition + '.csv'
 
-    for a in range(len(distm)):
-        ndistmB.append([])
-        for b in range(len(distm)):
-            normed = (distm[a][b] - mini) / (maxi - mini)
-            ndistmB[a].append(normed)
+    timeFunction(saveClustersToCsv.__name__, lambda: saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping))
 
-    startg = time.time()
-    distm = []
+    generateDag(addition, clu.labels_, csv_file)
 
-    filename = 'gapsDist' + addition + '.txt'
+    generateGraphs(addition, csv_file, mapping, keys, values)
 
-    print("starting gaps dist")
-    distm = [-1] * len(data.values())
-    distm = [[-1] * len(data.values()) for i in distm]
 
-    for a in range(len(data.values())):
-        for b in range(len(data.values())):
+def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping):
+    final_clusters = {}
+    final_probs = {}
 
-            i = [x[0] for x in values[a]][:thresh]
-            j = [x[0] for x in values[b]][:thresh]
+    cluster_string = "clusters: "
+    for lab in set(clu.labels_):
+        occ = [i for i, x in enumerate(clu.labels_) if x == lab]
+        final_probs[lab] = [x for i, x in zip(clu.labels_, clu.probabilities_) if i == lab]
+        cluster_string += str(lab) + ":" + str(len([labels[x] for x in occ])) + " items, "
+        final_clusters[lab] = [labels[x] for x in occ]
+    print(cluster_string)
 
-            if len(i) == 0 or len(j) == 0: continue
+    with open(csv_file, 'w') as outfile:
+        outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
+        for n, clus in final_clusters.items():
 
-            if a == b:
-                distm[a][b] = 0.0
-            elif b > a:
-                dist, path = fastdtw(i, j, dist=euclidean)
-                distm[a][b] = dist
-                distm[b][a] = dist
+            for idx, el in enumerate([inv_mapping[x] for x in clus]):
 
-    with open(filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+                ip = el.split('->')
+                if '-' in ip[0]:
+                    classname = el.split('-')[1]
+                else:
+                    classname = el.split('.pcap')[0]
 
-    endg = time.time()
-    print('gaps ', (endg - startg))
-    ndistmG = []
-    mini = min(min(distm))
-    maxi = max(max(distm))
+                filename = el.split('.pcap')[0]
 
-    for a in range(len(distm)):
-        ndistmG.append([])
-        for b in range(len(distm)):
-            normed = (distm[a][b] - mini) / (maxi - mini)
-            ndistmG[a].append(normed)
+                outfile.write(
+                    str(n) + "," + str(mapping[el]) + "," + str(final_probs[n][idx]) + "," + str(classname) + "," + str(
+                        filename) + "," + ip[0] + "," + ip[1] + "\n")
 
-    # source port
-    ndistmS = []
-    distm = []
 
-    starts = time.time()
+def generateClusterGraph(addition, ndistm, labels, projection):
+    colors = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
+              'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
+              'maroon', 'deepskyblue', 'silver']
+    pal = sns.color_palette(colors)
+    extra_cols = len(set(labels)) - 18
+    pal_extra = sns.color_palette('Paired', extra_cols)
+    pal.extend(pal_extra)
 
-    filename = 'sportDist' + addition + '.txt'
+    col = [pal[x] for x in labels]
 
-    print("starting sport dist")
-    distm = [-1] * len(data.values())
-    distm = [[-1] * len(data.values()) for i in distm]
+    assert len(labels) == len(ndistm)
+    plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.2)
+    for i, txt in enumerate(labels):
+        plt.scatter(projection.T[0][i], projection.T[1][i], color=col[i], alpha=0.6)
+        if txt == -1:
+            continue
 
-    ngrams = []
-    for a in range(len(values)):
-        profile = dict()
+        plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], alpha=0.6)
+    plt.savefig("clustering-result" + addition)
 
-        dat = [x[3] for x in values[a]][:thresh]
 
-        li = zip(dat, dat[1:], dat[2:])
-        for b in li:
-            if b not in profile.keys():
-                profile[b] = 0
-
-            profile[b] += 1
-
-        ngrams.append(profile)
-
-    assert len(ngrams) == len(values)
-    for a in range(len(ngrams)):
-        for b in range(len(ngrams)):
-            i = ngrams[a]
-            j = ngrams[b]
-            ngram_all = list(set(i.keys()) | set(j.keys()))
-            i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
-            j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
-
-            if a == b:
-                distm[a][b] = 0.0
-            elif b > a:
-
-                dist = cosine(i_vec, j_vec)
-                distm[a][b] = dist
-                distm[b][a] = dist
-
-    with open(filename, 'w') as outfile:
-        for a in range(len(distm)):
-            # print distm[a]
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-    ends = time.time()
-    print('sport ', (ends - starts))
-
-    for a in range(len(distm)):
-        ndistmS.append([])
-        for b in range(len(distm)):
-            ndistmS[a].append(distm[a][b])
-
-    # dest port
-    ndistmD = []
-    distm = []
-
-    startd = time.time()
-
-    print("starting dport dist")
-    distm = [-1] * len(data.values())
-    distm = [[-1] * len(data.values()) for i in distm]
-
-    ngrams = []
-    for a in range(len(values)):
-
-        profile = dict()
-        dat = [x[4] for x in values[a]][:thresh]
-
-        li = zip(dat, dat[1:], dat[2:])
-
-        for b in li:
-            if b not in profile.keys():
-                profile[b] = 0
-            profile[b] += 1
-        ngrams.append(profile)
-
-    assert len(ngrams) == len(values)
-    for a in range(len(ngrams)):
-        for b in range(len(ngrams)):
-            if a == b:
-                distm[a][b] = 0.0
-            elif b > a:
-                i = ngrams[a]
-                j = ngrams[b]
-                ngram_all = list(set(i.keys()) | set(j.keys()))
-                i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
-                j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
-                dist = round(cosine(i_vec, j_vec), 8)
-                distm[a][b] = dist
-                distm[b][a] = dist
-
-    with open(filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-    endd = time.time()
-    print('time dport ', (endd - startd))
-
-    for a in range(len(distm)):
-        ndistmD.append([])
-        for b in range(len(distm)):
-            ndistmD[a].append(distm[a][b])
-
-    ndistm = []
-
-    for a in range(len(ndistmS)):
-        ndistm.append([])
-        for b in range(len(ndistmS)):
-            ndistm[a].append((ndistmB[a][b] + ndistmG[a][b] + ndistmD[a][b] + ndistmS[a][b]) / 4.0)
-
-    print("done distance meaurement")
-    print(len(ndistm))
-    print(len(ndistm[0]))
-
+def generateClusters(addition, ndistm):
     RS = 3072018
     projection = TSNE(random_state=RS).fit_transform(ndistm)
     plt.scatter(*projection.T)
     plt.savefig("tsne-result" + addition)
     plt.close()
-
     size = 7
     sample = 7
-
     model = hdbscan.HDBSCAN(min_cluster_size=size, min_samples=sample, cluster_selection_method='leaf',
                             metric='precomputed')
     clu = model.fit(np.array([np.array(x) for x in ndistm]))  # final for citadel and dridex
     joblib.dump(clu, 'model' + addition + '.pkl')
-
     print("num clusters: " + str(len(set(clu.labels_)) - 1))
-
     avg = 0.0
     for line in list(set(clu.labels_)):
         if line != -1:
             avg += sum([(1 if x == line else 0) for x in clu.labels_])
     print("avergae size of cluster:" + str(float(avg) / float(len(set(clu.labels_)) - 1)))
     print("samples in noise: " + str(sum([(1 if x == -1 else 0) for x in clu.labels_])))
+    return clu, projection
 
-    cols = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
-            'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
-            'maroon', 'deepskyblue', 'silver']
-    pal = sns.color_palette(cols)
 
-    extra_cols = len(set(clu.labels_)) - 18
-
-    pal_extra = sns.color_palette('Paired', extra_cols)
-    pal.extend(pal_extra)
-    col = [pal[x] for x in clu.labels_]
-    assert len(clu.labels_) == len(ndistm)
-
-    plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.2)
-
-    for i, txt in enumerate(clu.labels_):
-        plt.scatter(projection.T[0][i], projection.T[1][i], color=col[i], alpha=0.6)
-        if txt == -1:
-            continue
-
-        plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], alpha=0.6)
-
-    plt.savefig("clustering-result" + addition)
-
-    # writing csv file
-    print("writing csv file")
-    final_clusters = {}
-    final_probs = {}
-    for lab in set(clu.labels_):
-        occ = [i for i, x in enumerate(clu.labels_) if x == lab]
-        final_probs[lab] = [x for i, x in zip(clu.labels_, clu.probabilities_) if i == lab]
-        print("cluster: " + str(lab) + " num items: " + str(len([labels[x] for x in occ])))
-        final_clusters[lab] = [labels[x] for x in occ]
-
-    csv_file = 'clusters' + addition + '.csv'
-    outfile = open(csv_file, 'w')
-    outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
-
-    for n, clus in final_clusters.items():
-
-        for idx, el in enumerate([inv_mapping[x] for x in clus]):
-
-            ip = el.split('->')
-            if '-' in ip[0]:
-                classname = el.split('-')[1]
-            else:
-                classname = el.split('.pcap')[0]
-
-            filename = el.split('.pcap')[0]
-
-            outfile.write(
-                str(n) + "," + str(mapping[el]) + "," + str(final_probs[n][idx]) + "," + str(classname) + "," + str(
-                    filename) + "," + ip[0] + "," + ip[1] + "\n")
-    outfile.close()
-
-    # Making tree
-    print('Producing DAG with relationships between pcaps')
-    clusters = {}
-    numclus = len(set(clu.labels_))
-    with open(csv_file, 'r') as f1:
-        reader = csv.reader(f1, delimiter=',')
-        for i, line in enumerate(reader):
-            if i > 0:
-                if line[4] not in clusters.keys():
-                    clusters[line[4]] = []
-                clusters[line[4]].append((line[3], line[0]))  # classname, cluster#
-    f1.close()
-    array = [str(x) for x in range(numclus - 1)]
-    array.append("-1")
-
-    treeprep = dict()
-    for filename, val in clusters.items():
-        arr = [0] * numclus
-        for fam, clus in val:
-            ind = array.index(clus)
-            arr[ind] = 1
-        mas = ''.join([str(x) for x in arr[:-1]])
-        famname = fam
-        print(filename + "\t" + fam + "\t" + ''.join([str(x) for x in arr[:-1]]))
-        if mas not in treeprep.keys():
-            treeprep[mas] = dict()
-        if famname not in treeprep[mas].keys():
-            treeprep[mas][famname] = set()
-        treeprep[mas][famname].add(str(filename))
-
-    with open('mas-details' + addition + '.csv', 'w') as f2:
-        for k, v in treeprep.items():
-            for kv, vv in v.items():
-                f2.write(str(k) + ';' + str(kv) + ';' + str(len(vv)) + '\n')
-
-    with open('mas-details' + addition + '.csv', 'r') as f3:
-        csv_reader = csv.reader(f3, delimiter=';')
-
-        graph = {}
-
-        names = {}
-        for line in csv_reader:
-            graph[line[0]] = set()
-            if line[0] not in names.keys():
-                names[line[0]] = []
-            names[line[0]].append(line[1] + "(" + line[2] + ")")
-
-        zeros = ''.join(['0'] * (numclus - 1))
-        if zeros not in graph.keys():
-            graph[zeros] = set()
-
-        ulist = graph.keys()
-        covered = set()
-        next = deque()
-
-        next.append(zeros)
-
-        while len(next) > 0:
-            l1 = next.popleft()
-            covered.add(l1)
-            for l2 in ulist:
-                if l2 not in covered and difference(l1, l2) == 1:
-                    graph[l1].add(l2)
-
-                    if l2 not in next:
-                        next.append(l2)
-
-        val = set()
-        for v in graph.values():
-            val.update(v)
-
-        notmain = [x for x in ulist if x not in val]
-        notmain.remove(zeros)
-        nums = [sum([int(y) for y in x]) for x in notmain]
-        notmain = [x for _, x in sorted(zip(nums, notmain))]
-
-        specials = notmain
-
-        extras = set()
-
-        for nm in notmain:
-            comp = set()
-            comp.update(val)
-            comp.update(extras)
-
-            mindist = 1000
-
-            for line in comp:
-                if nm != line:
-                    diff = difference(nm, line)
-                    if diff < mindist:
-                        mindist = diff
-                        minli = line
-
-            diffbase = difference(nm, zeros)
-
-            if diffbase <= mindist:
-                minli = zeros
-
-            num1 = sum([int(s) for s in nm])
-            num2 = sum([int(s) for s in minli])
-            if num1 < num2:
-                graph[nm].add(minli)
-            else:
-                graph[minli].add(nm)
-
-            extras.add(nm)
-
-        val = set()
-        for v in graph.values():
-            val.update(v)
-            f2 = open('relation-tree' + addition + '.dot', 'w')
-            f2.write("digraph dag {\n")
-            f2.write("rankdir=LR;\n")
-            for idx, li in names.items():
-                name = str(idx) + '\n'
-
-                for line in li:
-                    name += line + ',\n'
-                if idx not in specials:
-                    text = str(idx) + " [label=\"" + name + "\" , shape=box;]"
-                else:  # treat in a special way. For now, leaving intact
-                    text = str(idx) + " [shape=box label=\"" + name + "\"]"
-
-                f2.write(text)
-                f2.write('\n')
-            for k, v in graph.items():
-                for vi in v:
-                    f2.write(str(k) + "->" + str(vi))
-                    f2.write('\n')
-            f2.write("}")
-            f2.close()
-        # Rendering DAG
-        print('Rendering DAG -- needs graphviz dot')
-        try:
-            os.system('dot -Tpng relation-tree' + addition + '.dot -o DAG' + addition + '.png')
-            print('Done')
-        except:
-            print('Failed')
-            pass
-
+def generateGraphs(addition, csv_file, mapping, keys, values):
     print("writing temporal heatmaps")
-
     if not os.path.exists('figs' + addition + '/'):
         os.mkdir('figs' + addition + '/')
         os.mkdir('figs' + addition + '/bytes')
         os.mkdir('figs' + addition + '/gaps')
         os.mkdir('figs' + addition + '/sport')
         os.mkdir('figs' + addition + '/dport')
-
     actlabels = []
     for a in range(len(values)):
         actlabels.append(mapping[keys[a]])
-
     clusterinfo = {}
     seqclufile = csv_file
     lines = open(seqclufile).readlines()[1:]
-
     for line in lines:
         li = line.split(",")  # clusnum, connnum, prob, srcip, dstip
         srcip = li[5]
@@ -514,7 +177,6 @@ def connlevel_sequence(metadata, mapping):
             clusterinfo[li[0]] = []
         clusterinfo[li[0]].append((has, name))
     print("rendering ... ")
-
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
     for names, sname, q in [("Packet sizes", "bytes", 1), ("Interval", "gaps", 0), ("Source Port", "sport", 2),
@@ -529,7 +191,7 @@ def connlevel_sequence(metadata, mapping):
             dataf = []
 
             for b in blah:
-                dataf.append([x[q] for x in b][:thresh])
+                dataf.append([x[q] for x in b])
 
             df = pd.DataFrame(dataf, index=labels)
 
@@ -552,11 +214,336 @@ def connlevel_sequence(metadata, mapping):
 
             for b in blah:
                 dataf.append([x[q] for x in b][:20])
+
             df = pd.DataFrame(dataf, index=labelsnew)
             g = sns.heatmap(df, xticklabels=False)
             plt.setp(g.get_yticklabels(), rotation=0)
             plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
             plt.savefig("figs" + addition + "/" + sname + "/" + clusnum)
+
+
+def generateDag(addition, labels, csv_file):
+    print('Producing DAG with relationships between pcaps')
+    clusters = {}
+    numclus = len(set(labels))
+    with open(csv_file, 'r') as f1:
+        reader = csv.reader(f1, delimiter=',')
+        for i, line in enumerate(reader):
+            if i > 0:
+                if line[4] not in clusters.keys():
+                    clusters[line[4]] = []
+                clusters[line[4]].append((line[3], line[0]))  # classname, cluster#
+    f1.close()
+    array = [str(x) for x in range(numclus - 1)]
+    array.append("-1")
+    treeprep = dict()
+    for filename, val in clusters.items():
+        arr = [0] * numclus
+        for fam, clus in val:
+            ind = array.index(clus)
+            arr[ind] = 1
+        mas = ''.join([str(x) for x in arr[:-1]])
+        famname = fam
+        print(filename + "\t" + fam + "\t" + ''.join([str(x) for x in arr[:-1]]))
+        if mas not in treeprep.keys():
+            treeprep[mas] = dict()
+        if famname not in treeprep[mas].keys():
+            treeprep[mas][famname] = set()
+        treeprep[mas][famname].add(str(filename))
+    with open('mas-details' + addition + '.csv', 'w') as f2:
+        for k, v in treeprep.items():
+            for kv, vv in v.items():
+                f2.write(str(k) + ';' + str(kv) + ';' + str(len(vv)) + '\n')
+
+    graph = {}
+    names = {}
+    with open('mas-details' + addition + '.csv', 'r') as f3:
+        csv_reader = csv.reader(f3, delimiter=';')
+
+        for line in csv_reader:
+            graph[line[0]] = set()
+            if line[0] not in names.keys():
+                names[line[0]] = []
+            names[line[0]].append(line[1] + "(" + line[2] + ")")
+
+    zeros = ''.join(['0'] * (numclus - 1))
+    if zeros not in graph.keys():
+        graph[zeros] = set()
+
+    ulist = graph.keys()
+    covered = set()
+    next = deque()
+
+    next.append(zeros)
+
+    while len(next) > 0:
+        l1 = next.popleft()
+        covered.add(l1)
+        for l2 in ulist:
+            if l2 not in covered and difference(l1, l2) == 1:
+                graph[l1].add(l2)
+
+                if l2 not in next:
+                    next.append(l2)
+
+    val = set()
+    for v in graph.values():
+        val.update(v)
+
+    notmain = [x for x in ulist if x not in val]
+    notmain.remove(zeros)
+    nums = [sum([int(y) for y in x]) for x in notmain]
+    notmain = [x for _, x in sorted(zip(nums, notmain))]
+
+    specials = notmain
+
+    extras = set()
+
+    for nm in notmain:
+        comp = set()
+        comp.update(val)
+        comp.update(extras)
+
+        mindist = 1000
+
+        for line in comp:
+            if nm != line:
+                diff = difference(nm, line)
+                if diff < mindist:
+                    mindist = diff
+                    minli = line
+
+        diffbase = difference(nm, zeros)
+
+        if diffbase <= mindist:
+            minli = zeros
+
+        num1 = sum([int(s) for s in nm])
+        num2 = sum([int(s) for s in minli])
+        if num1 < num2:
+            graph[nm].add(minli)
+        else:
+            graph[minli].add(nm)
+
+        extras.add(nm)
+
+    val = set()
+    for v in graph.values():
+        val.update(v)
+        with open('relation-tree' + addition + '.dot', 'w') as f2:
+            f2.write("digraph dag {\n")
+            f2.write("rankdir=LR;\n")
+            for idx, li in names.items():
+                name = str(idx) + '\n'
+
+                for line in li:
+                    name += line + ',\n'
+                if idx not in specials:
+                    text = str(idx) + " [label=\"" + name + "\" , shape=box;]"
+                else:  # treat in a special way. For now, leaving intact
+                    text = str(idx) + " [shape=box label=\"" + name + "\"]"
+
+                f2.write(text)
+                f2.write('\n')
+            for k, v in graph.items():
+                for vi in v:
+                    f2.write(str(k) + "->" + str(vi))
+                    f2.write('\n')
+            f2.write("}")
+
+    # Rendering DAG
+    print('Rendering DAG -- needs graphviz dot')
+    try:
+        os.system('dot -Tpng relation-tree' + addition + '.dot -o DAG' + addition + '.png')
+    except:
+        pass
+
+
+def normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS):
+    ndistm = []
+
+    for a in range(len(ndistmS)):
+        ndistm.append([])
+        for b in range(len(ndistmS)):
+            ndistm[a].append((ndistmB[a][b] + ndistmG[a][b] + ndistmD[a][b] + ndistmS[a][b]) / 4.0)
+
+    return ndistm
+
+
+def normalizedGapsDistance(addition, values):
+    dataValuesLength = len(values)
+    filename = 'gapsDist' + addition + '.txt'
+    distm = [x[:] for x in [[-1] * dataValuesLength] * dataValuesLength]
+
+    for a in range(dataValuesLength):
+        for b in range(a, dataValuesLength):
+            if a == b:
+                distm[a][b] = 0.0
+
+            i = [x[0] for x in values[a]]
+            j = [x[0] for x in values[b]]
+            if len(i) == 0 or len(j) == 0: continue
+
+            dist, path = fastdtw(i, j, dist=euclidean)
+            distm[a][b] = dist
+            distm[b][a] = dist
+
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+
+    return normalize2dArray(distm)
+
+
+def normalizedByteDistance(addition, mapping, inv_mapping, keys, values):
+    dataValuesLength = len(values)
+    filename = 'bytesDist' + addition + '.txt'
+    distm = [x[:] for x in [[-1] * dataValuesLength] * dataValuesLength]
+
+    labels = []
+    ipmapping = []
+
+    for a in range(dataValuesLength):
+        labels.append(mapping[keys[a]])
+        ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
+        for b in range(a, dataValuesLength):
+            if a == b:
+                distm[a][b] = 0.0
+
+            i = [x[1] for x in values[a]]
+            j = [x[1] for x in values[b]]
+            if len(i) == 0 or len(j) == 0: continue
+
+            dist, path = fastdtw(i, j, dist=euclidean)
+            distm[a][b] = dist
+            distm[b][a] = dist
+
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+
+    with open('labels' + addition + '.txt', 'w') as outfile:
+        outfile.write(' '.join([str(l) for l in labels]) + '\n')
+
+    with open('mapping' + addition + '.txt', 'w') as outfile:
+        outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
+
+    return labels, normalize2dArray(distm)
+
+
+def normalize2dArray(distm):
+    normalized_distm = []
+
+    mini = min(min(distm))
+    maxi = max(max(distm))
+    subtracted = maxi - mini
+
+    for a in range(len(distm)):
+        normalized_distm.append([])
+        for b in range(len(distm)):
+            normed = (distm[a][b] - mini) / subtracted
+            normalized_distm[a].append(normed)
+
+    return normalized_distm
+
+
+def normalizedSourcePortDistance(addition, values):
+    ndistmS = []
+
+    dataValuesLength = len(values)
+    filename = 'sportDist' + addition + '.txt'
+    distm = [x[:] for x in [[-1] * dataValuesLength] * dataValuesLength]
+
+    ngrams = []
+    for a in range(len(values)):
+        profile = dict()
+
+        dat = [x[3] for x in values[a]]
+
+        li = zip(dat, dat[1:], dat[2:])
+        for b in li:
+            if b not in profile.keys():
+                profile[b] = 0
+
+            profile[b] += 1
+
+        ngrams.append(profile)
+    assert len(ngrams) == len(values)
+    for a in range(len(ngrams)):
+        for b in range(a, len(ngrams)):
+            if a == b:
+                distm[a][b] = 0.0
+
+            i = ngrams[a]
+            j = ngrams[b]
+            ngram_all = list(set(i.keys()) | set(j.keys()))
+            i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
+            j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
+
+            dist = cosine(i_vec, j_vec)
+            distm[a][b] = dist
+            distm[b][a] = dist
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+
+    for a in range(len(distm)):
+        ndistmS.append([])
+        for b in range(len(distm)):
+            ndistmS[a].append(distm[a][b])
+
+    return ndistmS
+
+
+def normalizedDestinationPortDistance(addition, values):
+    ndistmD = []
+
+    dataValuesLength = len(values)
+    filename = 'dportDist' + addition + '.txt'
+    distm = [x[:] for x in [[-1] * dataValuesLength] * dataValuesLength]
+
+    ngrams = []
+    for a in range(dataValuesLength):
+        profile = dict()
+        dat = [x[4] for x in values[a]]
+
+        li = zip(dat, dat[1:], dat[2:])
+
+        for b in li:
+            if b not in profile.keys():
+                profile[b] = 0
+            profile[b] += 1
+        ngrams.append(profile)
+
+    assert len(ngrams) == dataValuesLength
+    for a in range(dataValuesLength):
+        for b in range(a, dataValuesLength):
+            if a == b:
+                distm[a][b] = 0.0
+            else:
+                i = ngrams[a]
+                j = ngrams[b]
+                ngram_all = list(set(i.keys()) | set(j.keys()))
+                i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
+                j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
+                dist = round(cosine(i_vec, j_vec), 8)
+                distm[a][b] = dist
+                distm[b][a] = dist
+
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+
+    for a in range(len(distm)):
+        ndistmD.append([])
+        for b in range(len(distm)):
+            ndistmD[a].append(distm[a][b])
+
+    return ndistmD
+
+
+def difference(str1, str2):
+    return sum([str1[x] != str2[x] for x in range(len(str1))])
 
 
 def inet_to_str(inet: bytes) -> str:
@@ -566,31 +553,17 @@ def inet_to_str(inet: bytes) -> str:
         return socket.inet_ntop(socket.AF_INET6, inet)
 
 
-src_set, dst_set, gap_set, proto_set, bytes_set, events_set, ip_set, dns_set, port_set = set(), set(), set(), set(), set(), set(), set(), set(), set()
-src_dict, dst_dict, proto_dict, events_dict, dns_dict, port_dict = {}, {}, {}, {}, {}, {}
-bytes, gap_list = [], []
-
-
 def readpcap(filename):
     print("Reading", os.path.basename(filename))
-    counter = 0
 
+    counter = 0
     connections = {}
-    prev = -1
-    gaps = []
-    bla = 0
+    previousTimestamp = {}
+
     with open(filename, 'rb') as f:
         pcap = dpkt.pcap.Reader(f)
         for ts, pkt in pcap:
-            timestamp = datetime.datetime.utcfromtimestamp(ts)
-            gap = 0.0 if prev == -1 else (timestamp - prev).microseconds / 1000
-
-            if prev == -1:
-                pass
-
-            prev = timestamp
             counter += 1
-            bla += 1
             try:
                 eth = dpkt.ethernet.Ethernet(pkt)
             except:
@@ -603,10 +576,19 @@ def readpcap(filename):
 
             level4 = level3.data
 
-            gaps.append((gap, level3.len, level3.p))
-
             src_ip = inet_to_str(level3.src)
             dst_ip = inet_to_str(level3.dst)
+
+            key = (src_ip, dst_ip)
+
+            timestamp = datetime.datetime.utcfromtimestamp(ts)
+
+            if key in previousTimestamp:
+                gap = (timestamp - previousTimestamp[key]).microseconds / 1000
+            else:
+                gap = 0
+
+            previousTimestamp[key] = timestamp
 
             if type(level4) is dpkt.tcp.TCP:
                 source_port = level4.sport
@@ -618,7 +600,6 @@ def readpcap(filename):
                 source_port = 0
                 destination_port = 0
 
-            key = (src_ip, dst_ip)
             flow_data = (gap, level3.len, level3.p, source_port, destination_port)
 
             if connections.get(key):
@@ -626,90 +607,98 @@ def readpcap(filename):
             else:
                 connections[key] = [flow_data]
 
-
         print(os.path.basename(filename), " num connections: ", len(connections))
-
-        todel = []
-        print('Before cleanup: Total packets: ', len(gaps), ' in ', len(connections), ' connections.')
-        for i, v in connections.items():  # clean it up
-            if len(v) < thresh:
-                todel.append(i)
-
-        for item in todel:
-            del connections[item]
+        print('Before cleanup: Total packets: ', len(connections), ' connections.')
+        for k in list(connections.keys()):  # clean it up
+            if len(connections[k]) < thresh:
+                connections.pop(k)
 
         print("Remaining connections after clean up ", len(connections))
 
-    return gaps, connections
+    return connections
 
 
-def readfolder():
-    fno = 0
+def readfolder(maxConnections=100):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
     print('About to read pcap...')
     for f in files:
-        key = os.path.basename(f)
+        connections = timeFunction(readpcap.__name__, lambda: readpcap(f))
 
-        data, connections = readpcap(f)
         if len(connections.items()) < 1:
             continue
 
-        for i, v in connections.items():
-            name = key + i[0] + "->" + i[1]
-            print(name)
-            mapping[name] = fno
-            fno += 1
-            meta[name] = v
+        key = os.path.basename(f)
+        fno = 0
 
-        print("Average conn length: ", np.mean([len(x) for i, x in connections.items()]))
-        print("Minimum conn length: ", np.min([len(x) for i, x in connections.items()]))
-        print("Maximum conn length: ", np.max([len(x) for i, x in connections.items()]))
-        print('----------------')
+        for i, v in connections.items():
+            if fno >= maxConnections:
+                break
+
+            amountOfPackages = len(v)
+            for window in range(amountOfPackages // thresh):
+                if window >= 1:
+                    break
+                name = key + i[0] + "->" + i[1] + ":" + str(window)
+                mapping[name] = fno
+                fno += 1
+                meta[name] = v[thresh * window:thresh * (window + 1)]
+
+        connectionSummary(connections)
 
     print('Done reading pcaps...')
     print('Collective surviving connections ', len(meta))
 
-    connlevel_sequence(meta, mapping)
+    timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
 
 
-def readfile():
-    startf = time.time()
-    mapping = {}
+def timeFunction(name, fun):
+    print(f"Started {name}...")
+    startf = time.perf_counter()
+    value = fun()
+    endf = time.perf_counter()
+    print(f"Completed {name} in {endf - startf:0.4f} seconds")
+    return value
+
+
+def readfile(f):
     print('About to read pcap...')
-    data, connections = readpcap(sys.argv[2])
+    connections = timeFunction(readpcap.__name__, lambda: readpcap(f))
     print('Done reading pcaps...')
+
     if len(connections.items()) < 1:
         return
 
-    endf = time.time()
-    print('file reading ', (endf - startf))
-    fno = 0
     meta = {}
-    print("Average conn length: ", np.mean([len(x) for i, x in connections.items()]))
-    print("Minimum conn length: ", np.min([len(x) for i, x in connections.items()]))
-    print("Maximum conn length: ", np.max([len(x) for i, x in connections.items()]))
+    mapping = {}
 
+    fno = 0
     for i, v in connections.items():
         name = i[0] + "->" + i[1]
         mapping[name] = fno
         fno += 1
-        meta[name] = v
+        meta[name] = v[:thresh]
 
-    print('Surviving connections ', len(meta))
-    startc = time.time()
-    connlevel_sequence(meta, mapping)
-    endc = time.time()
-    print('Total time ', (endc - startc))
+    connectionSummary(connections)
+
+    timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
+
+
+def connectionSummary(connections):
+    connectionLengths = [len(x) for i, x in connections.items()]
+    print("Average conn length: ", np.mean(connectionLengths))
+    print("Minimum conn length: ", np.min(connectionLengths))
+    print("Maximum conn length: ", np.max(connectionLengths))
+    print('----------------')
 
 
 def main():
     if len(sys.argv) < 2:
         print('incomplete command')
     elif sys.argv[1] == 'file':
-        readfile()
+        readfile(sys.argv[2])
     elif sys.argv[1] == 'folder':
-        readfolder()
+        readfolder(200)
     else:
         print('incomplete command')

@@ -6,7 +6,7 @@
   "scripts": {
     "install": "pip install -r requirements.txt",
     "cleanup": "rm -rf output",
-    "start": "npm run cleanup & python src/__init__.py folder data data & npm run moveOutput",
+    "start": "npm run cleanup && python src/__init__.py folder data data && npm run moveOutput",
     "moveOutput": "mkdir output && mv *-data-20* output",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
