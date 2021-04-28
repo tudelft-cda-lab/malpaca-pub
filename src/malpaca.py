@@ -33,6 +33,8 @@ thresh = 20
 if len(sys.argv) > 4:
     thresh = int(sys.argv[4])
 
+addition = '-' + expname + '-' + str(thresh)
+
 
 # @profile
 def connlevel_sequence(metadata, mapping):
@@ -44,39 +46,36 @@ def connlevel_sequence(metadata, mapping):
 
     # save intermediate results
 
-    addition = '-' + expname + '-' + str(thresh)
-
     # ----- start porting -------
 
     for n, feat in [(1, 'bytes'), (0, 'gaps'), (2, 'sport'), (3, 'dport')]:
-        f = open(feat + '-features' + addition, 'w')
-        for val in values:
-            vi = [str(x[n]) for x in val]
-            f.write(','.join(vi))
-            f.write("\n")
-        f.close()
+        with open(feat + '-features' + addition, 'w') as f:
+            for val in values:
+                vi = [str(x[n]) for x in val]
+                f.write(','.join(vi))
+                f.write("\n")
 
-    labels, ndistmB = timeFunction(normalizedByteDistance.__name__, lambda: normalizedByteDistance(addition, mapping, inv_mapping, keys, values))
+    labels, ndistmB = timeFunction(normalizedByteDistance.__name__, lambda: normalizedByteDistance(mapping, inv_mapping, keys, values))
 
-    ndistmG = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(addition, values))
+    ndistmG = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(values))
 
-    ndistmS = timeFunction(normalizedSourcePortDistance.__name__, lambda: normalizedSourcePortDistance(addition, values))
+    ndistmS = timeFunction(normalizedSourcePortDistance.__name__, lambda: normalizedSourcePortDistance(values))
 
-    ndistmD = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(addition, values))
+    ndistmD = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(values))
 
     ndistm = timeFunction(normalizedDistanceMeasurement.__name__, lambda: normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS))
 
-    clu, projection = generateClusters(addition, ndistm)
+    clu, projection = generateClusters(ndistm)
 
-    generateClusterGraph(addition, ndistm, clu.labels_, projection)
+    generateClusterGraph(clu.labels_, ndistm, projection)
 
     csv_file = 'clusters' + addition + '.csv'
 
     timeFunction(saveClustersToCsv.__name__, lambda: saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping))
 
-    generateDag(addition, clu.labels_, csv_file)
+    generateDag(clu.labels_, csv_file)
 
-    generateGraphs(addition, csv_file, mapping, keys, values)
+    generateGraphs(csv_file, mapping, keys, values)
 
 
 def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping):
@@ -110,7 +109,7 @@ def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping):
                         filename) + "," + ip[0] + "," + ip[1] + "\n")
 
 
-def generateClusterGraph(addition, ndistm, labels, projection):
+def generateClusterGraph(labels, ndistm, projection):
     colors = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
               'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
               'maroon', 'deepskyblue', 'silver']
@@ -132,7 +131,7 @@ def generateClusterGraph(addition, ndistm, labels, projection):
     plt.savefig("clustering-result" + addition)
 
 
-def generateClusters(addition, ndistm):
+def generateClusters(ndistm):
     RS = 3072018
     projection = TSNE(random_state=RS).fit_transform(ndistm)
     plt.scatter(*projection.T)
@@ -154,7 +153,7 @@ def generateClusters(addition, ndistm):
     return clu, projection
 
 
-def generateGraphs(addition, csv_file, mapping, keys, values):
+def generateGraphs(csv_file, mapping, keys, values):
     print("writing temporal heatmaps")
     if not os.path.exists('figs' + addition + '/'):
         os.mkdir('figs' + addition + '/')
@@ -224,7 +223,7 @@ def generateGraphs(addition, csv_file, mapping, keys, values):
             plt.savefig("figs" + addition + "/" + sname + "/" + clusnum)
 
 
-def generateDag(addition, labels, csv_file):
+def generateDag(labels, csv_file):
     print('Producing DAG with relationships between pcaps')
     clusters = {}
     numclus = len(set(labels))
@@ -372,7 +371,7 @@ def normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS):
     return ndistm
 
 
-def normalizedByteDistance(addition, mapping, inv_mapping, keys, values):
+def normalizedByteDistance(mapping, inv_mapping, keys, values):
     dataValuesLength = len(values)
     filename = 'bytesDist' + addition + '.txt'
 
@@ -400,7 +399,7 @@ def normalizedByteDistance(addition, mapping, inv_mapping, keys, values):
     return labels, normalize2dArray(distm)
 
 
-def normalizedGapsDistance(addition, values):
+def normalizedGapsDistance(values):
     dataValuesLength = len(values)
     filename = 'gapsDist' + addition + '.txt'
 
@@ -434,7 +433,7 @@ def normalize2dArray(distm):
     return normalized_distm
 
 
-def normalizedSourcePortDistance(addition, values):
+def normalizedSourcePortDistance(values):
     ndistmS = []
 
     dataValuesLength = len(values)
@@ -482,7 +481,7 @@ def normalizedSourcePortDistance(addition, values):
     return ndistmS
 
 
-def normalizedDestinationPortDistance(addition, values):
+def normalizedDestinationPortDistance(values):
     ndistmD = []
 
     dataValuesLength = len(values)
