@@ -11,3 +11,5 @@ seaborn~=0.11.1
 dtw~=1.4.0
 statsmodels~=0.12.2
 hdbscan~=0.8.27
+fastdist~=1.1.2
+numba~=0.53.1

@@ -4,10 +4,12 @@ import csv
 import datetime
 import glob
 import os
+import pickle
 import socket
 import sys
 import time
 from collections import deque
+from fastdist import fastdist
 
 import dpkt
 import hdbscan
@@ -17,8 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from fastdtw import fastdtw
-from scipy.spatial.distance import cosine, euclidean
+
+from scipy.spatial.distance import cosine
 from sklearn.manifold import TSNE
 
 plt.rcParams.update({'figure.max_open_warning': 0})
@@ -370,53 +372,20 @@ def normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS):
     return ndistm
 
 
-def normalizedGapsDistance(addition, values):
-    dataValuesLength = len(values)
-    filename = 'gapsDist' + addition + '.txt'
-    distm = [x[:] for x in [[-1] * dataValuesLength] * dataValuesLength]
-
-    for a in range(dataValuesLength):
-        for b in range(a, dataValuesLength):
-            if a == b:
-                distm[a][b] = 0.0
-
-            i = [x[0] for x in values[a]]
-            j = [x[0] for x in values[b]]
-            if len(i) == 0 or len(j) == 0: continue
-
-            dist, path = fastdtw(i, j, dist=euclidean)
-            distm[a][b] = dist
-            distm[b][a] = dist
-
-    with open(filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-    return normalize2dArray(distm)
-
-
 def normalizedByteDistance(addition, mapping, inv_mapping, keys, values):
     dataValuesLength = len(values)
     filename = 'bytesDist' + addition + '.txt'
-    distm = [x[:] for x in [[-1] * dataValuesLength] * dataValuesLength]
 
     labels = []
     ipmapping = []
+    bytesDistances = np.zeros((dataValuesLength, thresh))
 
     for a in range(dataValuesLength):
         labels.append(mapping[keys[a]])
         ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
-        for b in range(a, dataValuesLength):
-            if a == b:
-                distm[a][b] = 0.0
+        bytesDistances[a] = [x[1] for x in values[a]]
 
-            i = [x[1] for x in values[a]]
-            j = [x[1] for x in values[b]]
-            if len(i) == 0 or len(j) == 0: continue
-
-            dist, path = fastdtw(i, j, dist=euclidean)
-            distm[a][b] = dist
-            distm[b][a] = dist
+    distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
     with open(filename, 'w') as outfile:
         for a in range(len(distm)):
@@ -431,11 +400,29 @@ def normalizedByteDistance(addition, mapping, inv_mapping, keys, values):
     return labels, normalize2dArray(distm)
 
 
+def normalizedGapsDistance(addition, values):
+    dataValuesLength = len(values)
+    filename = 'gapsDist' + addition + '.txt'
+
+    gapsDistances = np.zeros((dataValuesLength, thresh))
+
+    for a in range(dataValuesLength):
+        gapsDistances[a] = [x[0] for x in values[a]]
+
+    distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
+
+    with open(filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+
+    return normalize2dArray(distm)
+
+
 def normalize2dArray(distm):
     normalized_distm = []
 
-    mini = min(min(distm))
-    maxi = max(max(distm))
+    mini = distm.min()
+    maxi = distm.max()
     subtracted = maxi - mini
 
     for a in range(len(distm)):
@@ -543,6 +530,7 @@ def normalizedDestinationPortDistance(addition, values):
 
 
 def difference(str1, str2):
+    assert len(str1) == len(str2)
     return sum([str1[x] != str2[x] for x in range(len(str1))])
 
 
@@ -618,34 +606,46 @@ def readpcap(filename):
     return connections
 
 
-def readfolder(maxConnections=100):
+def readfolder(maxConnections=500, useCache=False):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
     print('About to read pcap...')
-    for f in files:
-        connections = timeFunction(readpcap.__name__, lambda: readpcap(f))
 
-        if len(connections.items()) < 1:
-            continue
+    if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and useCache:
+        with open('data/meta.pkl', 'rb') as file:
+            meta = pickle.load(file)
+        with open('data/mapping.pkl', 'rb') as file:
+            mapping = pickle.load(file)
+    else:
+        for f in files:
+            connections = timeFunction(readpcap.__name__, lambda: readpcap(f))
 
-        key = os.path.basename(f)
-        fno = 0
+            if len(connections.items()) < 1:
+                continue
 
-        for i, v in connections.items():
-            if fno >= maxConnections:
-                break
+            key = os.path.basename(f)
+            fno = 0
 
-            amountOfPackages = len(v)
-            for window in range(amountOfPackages // thresh):
-                if window >= 1:
+            for i, v in connections.items():
+                if fno >= maxConnections:
                     break
-                name = key + i[0] + "->" + i[1] + ":" + str(window)
-                mapping[name] = fno
-                fno += 1
-                meta[name] = v[thresh * window:thresh * (window + 1)]
 
-        connectionSummary(connections)
+                amountOfPackages = len(v)
+                for window in range(amountOfPackages // thresh):
+                    if window >= 3:
+                        break
+                    name = key + i[0] + "->" + i[1] + ":" + str(window)
+                    mapping[name] = fno
+                    fno += 1
+                    meta[name] = v[thresh * window:thresh * (window + 1)]
+
+            connectionSummary(connections)
+
+        with open('data/meta.pkl', 'wb') as file:
+            pickle.dump(meta, file)
+        with open('data/mapping.pkl', 'wb') as file:
+            pickle.dump(mapping, file)
 
     print('Done reading pcaps...')
     print('Collective surviving connections ', len(meta))
@@ -699,6 +699,6 @@ def main():
     elif sys.argv[1] == 'file':
         readfile(sys.argv[2])
     elif sys.argv[1] == 'folder':
-        readfolder(200)
+        readfolder()
     else:
         print('incomplete command')
