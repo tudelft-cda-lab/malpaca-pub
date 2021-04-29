@@ -59,7 +59,8 @@ def connlevel_sequence(metadata, mapping):
                 f.write(','.join(vi))
                 f.write("\n")
 
-    labels, normalizeDistanceMeasurementBytes = timeFunction(normalizedByteDistance.__name__, lambda: normalizedByteDistance(mapping, inv_mapping, keys, values))
+    labels, normalizeDistanceMeasurementBytes = timeFunction(normalizedByteDistance.__name__,
+                                                             lambda: normalizedByteDistance(mapping, inv_mapping, keys, values))
 
     normalizeDistanceMeasurementGaps = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(values))
 
@@ -67,7 +68,10 @@ def connlevel_sequence(metadata, mapping):
 
     normalizeDistanceMeasurementDestinationPort = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(values))
 
-    normalizeDistanceMeasurement = timeFunction(normalizedDistanceMeasurement.__name__, lambda: normalizedDistanceMeasurement(normalizeDistanceMeasurementBytes, normalizeDistanceMeasurementDestinationPort, normalizeDistanceMeasurementGaps, normalizeDistanceMeasurementSourcePort))
+    normalizeDistanceMeasurement = timeFunction(normalizedDistanceMeasurement.__name__, lambda: normalizedDistanceMeasurement(normalizeDistanceMeasurementBytes,
+                                                                                                                              normalizeDistanceMeasurementDestinationPort,
+                                                                                                                              normalizeDistanceMeasurementGaps,
+                                                                                                                              normalizeDistanceMeasurementSourcePort))
 
     clu, projection = generateClusters(normalizeDistanceMeasurement)
 
@@ -365,14 +369,14 @@ def generateDag(labels, csv_file):
 
 
 def normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS):
-    ndistm = []
+    normalizedDistanceMetric = []
 
     for a in range(len(ndistmS)):
-        ndistm.append([])
+        normalizedDistanceMetric.append([])
         for b in range(len(ndistmS)):
-            ndistm[a].append((ndistmB[a][b] + ndistmG[a][b] + ndistmD[a][b] + ndistmS[a][b]) / 4.0)
+            normalizedDistanceMetric[a].append((ndistmB[a][b] + ndistmG[a][b] + ndistmD[a][b] + ndistmS[a][b]) / 4.0)
 
-    return ndistm
+    return normalizedDistanceMetric
 
 
 def normalizedByteDistance(mapping, inv_mapping, keys, values):
@@ -421,20 +425,20 @@ def normalizedGapsDistance(values):
     return normalize2dArray(distm)
 
 
-def normalize2dArray(distm):
-    normalized_distm = []
+def normalize2dArray(distanceMetric):
+    normalizedDistanceMetric = []
 
-    mini = distm.min()
-    maxi = distm.max()
+    mini = distanceMetric.min()
+    maxi = distanceMetric.max()
     subtracted = maxi - mini
 
-    for a in range(len(distm)):
-        normalized_distm.append([])
-        for b in range(len(distm)):
-            normed = (distm[a][b] - mini) / subtracted
-            normalized_distm[a].append(normed)
+    for a in range(len(distanceMetric)):
+        normalizedDistanceMetric.append([])
+        for b in range(len(distanceMetric)):
+            normalizedDistance = (distanceMetric[a][b] - mini) / subtracted
+            normalizedDistanceMetric[a].append(normalizedDistance)
 
-    return normalized_distm
+    return normalizedDistanceMetric
 
 
 def normalizedSourcePortDistance(values):
@@ -645,12 +649,13 @@ def readFolderWithPCAPs(maxConnections=500, slidingWindow=6, useCache=False, use
 
     return meta, mapping
 
+
 def timeFunction(name, fun):
     print(f"Started {name}...")
-    startf = time.perf_counter()
+    startTime = time.perf_counter()
     value = fun()
-    endf = time.perf_counter()
-    print(f"Completed {name} in {endf - startf:0.4f} seconds")
+    endTime = time.perf_counter()
+    print(f"Completed {name} in {endTime - startTime:0.4f} seconds")
     return value
 
 
