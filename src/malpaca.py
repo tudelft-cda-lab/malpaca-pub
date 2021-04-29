@@ -1,15 +1,17 @@
 #!/usr/bin/python3
-
 import csv
 import datetime
 import glob
+import multiprocessing
 import os
 import pickle
 import shutil
 import socket
 import sys
+import threading
 import time
 from collections import deque
+from multiprocessing import shared_memory
 
 import dpkt
 import hdbscan
@@ -73,7 +75,7 @@ def connlevel_sequence(metadata, mapping):
                                                                                                                               normalizeDistanceMeasurementGaps,
                                                                                                                               normalizeDistanceMeasurementSourcePort))
 
-    clu, projection = generateClusters(normalizeDistanceMeasurement)
+    clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
 
     generateClusterGraph(clu.labels_, normalizeDistanceMeasurement, projection)
 
@@ -83,7 +85,9 @@ def connlevel_sequence(metadata, mapping):
 
     generateDag(clu.labels_, csv_file)
 
-    generateGraphs(csv_file, mapping, keys, values)
+    actualLabels, clusterInformation = timeFunction(generateHeatmaps.__name__, lambda: generateHeatmaps(csv_file, mapping, keys, values))
+
+    timeFunction(generateGraphs.__name__, lambda: generateGraphs(actualLabels, clusterInformation, values))
 
 
 def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping):
@@ -161,7 +165,7 @@ def generateClusters(ndistm):
     return clu, projection
 
 
-def generateGraphs(csv_file, mapping, keys, values):
+def generateHeatmaps(csv_file, mapping, keys, values):
     print("writing temporal heatmaps")
     if not os.path.exists(outputDir + 'figs' + addition + '/'):
         os.mkdir(outputDir + 'figs' + addition + '/')
@@ -173,8 +177,7 @@ def generateGraphs(csv_file, mapping, keys, values):
     for a in range(len(values)):
         actlabels.append(mapping[keys[a]])
     clusterinfo = {}
-    seqclufile = csv_file
-    lines = open(outputDir + seqclufile).readlines()[1:]
+    lines = open(outputDir + csv_file).readlines()[1:]
     for line in lines:
         li = line.split(",")  # clusnum, connnum, prob, srcip, dstip
         srcip = li[5]
@@ -185,50 +188,70 @@ def generateGraphs(csv_file, mapping, keys, values):
         if li[0] not in clusterinfo.keys():
             clusterinfo[li[0]] = []
         clusterinfo[li[0]].append((has, name))
-    print("rendering ... ")
+
+    return actlabels, clusterinfo
+
+
+def generateGraphs(actualLabels, clusterInfo, values):
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
-    for names, sname, q in [("Packet sizes", "bytes", 1), ("Interval", "gaps", 0), ("Source Port", "sport", 2),
-                            ("Dest. Port", "dport", 3)]:
-        for clusnum, cluster in clusterinfo.items():
-            labels = [x[1] for x in cluster]
 
-            acha = [actlabels.index(int(x[0])) for x in cluster]
+    for task in [(actualLabels, clusterInfo, values, "Packet sizes", "bytes", 1),
+                     (actualLabels, clusterInfo, values, "Interval", "gaps", 0),
+                     (actualLabels, clusterInfo, values, "Source Port", "sport", 2),
+                     (actualLabels, clusterInfo, values, "Dest. Port", "dport", 3)]:
+        generateTheGraph(*task)
 
-            blah = [values[a] for a in acha]
 
-            dataf = []
+def generateTheGraph(actlabels, clusterinfo, values, names, propertyName, q):
+    for clusterNumber, cluster in clusterinfo.items():
+        labels = [x[1] for x in cluster]
 
-            for b in blah:
-                dataf.append([x[q] for x in b])
+        acha = [actlabels.index(int(x[0])) for x in cluster]
 
-            df = pd.DataFrame(dataf, index=labels)
+        blah = [values[a] for a in acha]
 
-            g = sns.clustermap(df, xticklabels=False, col_cluster=False)
-            ind = g.dendrogram_row.reordered_ind
-            fig = plt.figure(figsize=(10.0, 9.0))
-            plt.suptitle("Exp: " + expname + " | Cluster: " + clusnum + " | Feature: " + names)
-            labelsnew = []
-            lol = []
-            for it in ind:
-                labelsnew.append(labels[it])
+        dataf = []
 
-                lol.append(cluster[[x[1] for x in cluster].index(labels[it])][0])
+        for b in blah:
+            dataf.append([x[q] for x in b])
 
-            acha = [actlabels.index(int(x)) for x in lol]
+        df = pd.DataFrame(dataf, index=labels)
 
-            blah = [values[a] for a in acha]
+        g = sns.clustermap(df, xticklabels=False, col_cluster=False)
+        ind = g.dendrogram_row.reordered_ind
 
-            dataf = []
+        if df.shape[0] <= 50:
+            plt.figure(figsize=(10.0, 9.0))
+        elif df.shape[0] <= 100:
+            plt.figure(figsize=(15.0, 18.0))
+        else:
+            plt.figure(figsize=(20.0, 27.0))
 
-            for b in blah:
-                dataf.append([x[q] for x in b][:20])
+        plt.suptitle("Exp: " + expname + " | Cluster: " + clusterNumber + " | Feature: " + names)
 
-            df = pd.DataFrame(dataf, index=labelsnew)
-            g = sns.heatmap(df, xticklabels=False)
-            plt.setp(g.get_yticklabels(), rotation=0)
-            plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
-            plt.savefig(outputDir + "figs" + addition + "/" + sname + "/" + clusnum)
+        labelsnew = []
+        lol = []
+        for it in ind:
+            labelsnew.append(labels[it])
+
+            lol.append(cluster[[x[1] for x in cluster].index(labels[it])][0])
+
+        acha = [actlabels.index(int(x)) for x in lol]
+
+        blah = [values[a] for a in acha]
+
+        dataf = []
+
+        for b in blah:
+            dataf.append([x[q] for x in b][:20])
+
+        df = pd.DataFrame(dataf, index=labelsnew)
+        g = sns.heatmap(df, xticklabels=False)
+        plt.setp(g.get_yticklabels(), rotation=0)
+        plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
+        plt.savefig(outputDir + "figs" + addition + "/" + propertyName + "/" + clusterNumber)
+        plt.clf()
 
 
 def generateDag(labels, csv_file):
@@ -589,7 +612,7 @@ def readPCAP(filename):
     return connections
 
 
-def readFolderWithPCAPs(maxConnections=500, slidingWindow=6, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(maxConnections=1000, slidingWindow=50, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
