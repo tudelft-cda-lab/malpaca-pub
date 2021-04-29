@@ -5,11 +5,11 @@ import datetime
 import glob
 import os
 import pickle
+import shutil
 import socket
 import sys
 import time
 from collections import deque
-from fastdist import fastdist
 
 import dpkt
 import hdbscan
@@ -19,8 +19,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-
-from scipy.spatial.distance import cosine
+from fastdist import fastdist
 from sklearn.manifold import TSNE
 
 plt.rcParams.update({'figure.max_open_warning': 0})
@@ -34,6 +33,7 @@ if len(sys.argv) > 4:
     thresh = int(sys.argv[4])
 
 addition = '-' + expname + '-' + str(thresh)
+outputDir = 'output/'  # All files in this folder will be deleted
 
 
 # @profile
@@ -45,29 +45,33 @@ def connlevel_sequence(metadata, mapping):
     keys = list(data.keys())
 
     # save intermediate results
-
+    if os.path.exists(outputDir):
+        shutil.rmtree(outputDir)
+        os.mkdir(outputDir)
+    else:
+        os.mkdir(outputDir)
     # ----- start porting -------
 
     for n, feat in [(1, 'bytes'), (0, 'gaps'), (2, 'sport'), (3, 'dport')]:
-        with open(feat + '-features' + addition, 'w') as f:
+        with open(outputDir + feat + '-features' + addition, 'w') as f:
             for val in values:
                 vi = [str(x[n]) for x in val]
                 f.write(','.join(vi))
                 f.write("\n")
 
-    labels, ndistmB = timeFunction(normalizedByteDistance.__name__, lambda: normalizedByteDistance(mapping, inv_mapping, keys, values))
+    labels, normalizeDistanceMeasurementBytes = timeFunction(normalizedByteDistance.__name__, lambda: normalizedByteDistance(mapping, inv_mapping, keys, values))
 
-    ndistmG = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(values))
+    normalizeDistanceMeasurementGaps = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(values))
 
-    ndistmS = timeFunction(normalizedSourcePortDistance.__name__, lambda: normalizedSourcePortDistance(values))
+    normalizeDistanceMeasurementSourcePort = timeFunction(normalizedSourcePortDistance.__name__, lambda: normalizedSourcePortDistance(values))
 
-    ndistmD = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(values))
+    normalizeDistanceMeasurementDestinationPort = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(values))
 
-    ndistm = timeFunction(normalizedDistanceMeasurement.__name__, lambda: normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS))
+    normalizeDistanceMeasurement = timeFunction(normalizedDistanceMeasurement.__name__, lambda: normalizedDistanceMeasurement(normalizeDistanceMeasurementBytes, normalizeDistanceMeasurementDestinationPort, normalizeDistanceMeasurementGaps, normalizeDistanceMeasurementSourcePort))
 
-    clu, projection = generateClusters(ndistm)
+    clu, projection = generateClusters(normalizeDistanceMeasurement)
 
-    generateClusterGraph(clu.labels_, ndistm, projection)
+    generateClusterGraph(clu.labels_, normalizeDistanceMeasurement, projection)
 
     csv_file = 'clusters' + addition + '.csv'
 
@@ -90,7 +94,7 @@ def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping):
         final_clusters[lab] = [labels[x] for x in occ]
     print(cluster_string)
 
-    with open(csv_file, 'w') as outfile:
+    with open(outputDir + csv_file, 'w') as outfile:
         outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
         for n, clus in final_clusters.items():
 
@@ -128,45 +132,45 @@ def generateClusterGraph(labels, ndistm, projection):
             continue
 
         plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], alpha=0.6)
-    plt.savefig("clustering-result" + addition)
+    plt.savefig(outputDir + "clustering-result" + addition)
 
 
 def generateClusters(ndistm):
     RS = 3072018
     projection = TSNE(random_state=RS).fit_transform(ndistm)
     plt.scatter(*projection.T)
-    plt.savefig("tsne-result" + addition)
+    plt.savefig(outputDir + "tsne-result" + addition)
     plt.close()
     size = 7
     sample = 7
     model = hdbscan.HDBSCAN(min_cluster_size=size, min_samples=sample, cluster_selection_method='leaf',
                             metric='precomputed')
     clu = model.fit(np.array([np.array(x) for x in ndistm]))  # final for citadel and dridex
-    joblib.dump(clu, 'model' + addition + '.pkl')
+    joblib.dump(clu, outputDir + 'model' + addition + '.pkl')
     print("num clusters: " + str(len(set(clu.labels_)) - 1))
     avg = 0.0
     for line in list(set(clu.labels_)):
         if line != -1:
             avg += sum([(1 if x == line else 0) for x in clu.labels_])
-    print("avergae size of cluster:" + str(float(avg) / float(len(set(clu.labels_)) - 1)))
+    print("average size of cluster:" + str(float(avg) / float(len(set(clu.labels_)) - 1)))
     print("samples in noise: " + str(sum([(1 if x == -1 else 0) for x in clu.labels_])))
     return clu, projection
 
 
 def generateGraphs(csv_file, mapping, keys, values):
     print("writing temporal heatmaps")
-    if not os.path.exists('figs' + addition + '/'):
-        os.mkdir('figs' + addition + '/')
-        os.mkdir('figs' + addition + '/bytes')
-        os.mkdir('figs' + addition + '/gaps')
-        os.mkdir('figs' + addition + '/sport')
-        os.mkdir('figs' + addition + '/dport')
+    if not os.path.exists(outputDir + 'figs' + addition + '/'):
+        os.mkdir(outputDir + 'figs' + addition + '/')
+        os.mkdir(outputDir + 'figs' + addition + '/bytes')
+        os.mkdir(outputDir + 'figs' + addition + '/gaps')
+        os.mkdir(outputDir + 'figs' + addition + '/sport')
+        os.mkdir(outputDir + 'figs' + addition + '/dport')
     actlabels = []
     for a in range(len(values)):
         actlabels.append(mapping[keys[a]])
     clusterinfo = {}
     seqclufile = csv_file
-    lines = open(seqclufile).readlines()[1:]
+    lines = open(outputDir + seqclufile).readlines()[1:]
     for line in lines:
         li = line.split(",")  # clusnum, connnum, prob, srcip, dstip
         srcip = li[5]
@@ -220,14 +224,14 @@ def generateGraphs(csv_file, mapping, keys, values):
             g = sns.heatmap(df, xticklabels=False)
             plt.setp(g.get_yticklabels(), rotation=0)
             plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
-            plt.savefig("figs" + addition + "/" + sname + "/" + clusnum)
+            plt.savefig(outputDir + "figs" + addition + "/" + sname + "/" + clusnum)
 
 
 def generateDag(labels, csv_file):
     print('Producing DAG with relationships between pcaps')
     clusters = {}
     numclus = len(set(labels))
-    with open(csv_file, 'r') as f1:
+    with open(outputDir + csv_file, 'r') as f1:
         reader = csv.reader(f1, delimiter=',')
         for i, line in enumerate(reader):
             if i > 0:
@@ -251,14 +255,14 @@ def generateDag(labels, csv_file):
         if famname not in treeprep[mas].keys():
             treeprep[mas][famname] = set()
         treeprep[mas][famname].add(str(filename))
-    with open('mas-details' + addition + '.csv', 'w') as f2:
+    with open(outputDir + 'mas-details' + addition + '.csv', 'w') as f2:
         for k, v in treeprep.items():
             for kv, vv in v.items():
                 f2.write(str(k) + ';' + str(kv) + ';' + str(len(vv)) + '\n')
 
     graph = {}
     names = {}
-    with open('mas-details' + addition + '.csv', 'r') as f3:
+    with open(outputDir + 'mas-details' + addition + '.csv', 'r') as f3:
         csv_reader = csv.reader(f3, delimiter=';')
 
         for line in csv_reader:
@@ -331,7 +335,7 @@ def generateDag(labels, csv_file):
     val = set()
     for v in graph.values():
         val.update(v)
-        with open('relation-tree' + addition + '.dot', 'w') as f2:
+        with open(outputDir + 'relation-tree' + addition + '.dot', 'w') as f2:
             f2.write("digraph dag {\n")
             f2.write("rankdir=LR;\n")
             for idx, li in names.items():
@@ -353,9 +357,9 @@ def generateDag(labels, csv_file):
             f2.write("}")
 
     # Rendering DAG
-    print('Rendering DAG -- needs graphviz dot')
+    print('Rendering DAG -- using graphviz dot')
     try:
-        os.system('dot -Tpng relation-tree' + addition + '.dot -o DAG' + addition + '.png')
+        os.system(f'dot -Tpng {outputDir}relation-tree{addition}.dot -o {outputDir}DAG{addition}.png')
     except:
         pass
 
@@ -386,14 +390,14 @@ def normalizedByteDistance(mapping, inv_mapping, keys, values):
 
     distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
-    with open(filename, 'w') as outfile:
+    with open(outputDir + filename, 'w') as outfile:
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
-    with open('labels' + addition + '.txt', 'w') as outfile:
+    with open(outputDir + 'labels' + addition + '.txt', 'w') as outfile:
         outfile.write(' '.join([str(l) for l in labels]) + '\n')
 
-    with open('mapping' + addition + '.txt', 'w') as outfile:
+    with open(outputDir + 'mapping' + addition + '.txt', 'w') as outfile:
         outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
 
     return labels, normalize2dArray(distm)
@@ -410,7 +414,7 @@ def normalizedGapsDistance(values):
 
     distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
-    with open(filename, 'w') as outfile:
+    with open(outputDir + filename, 'w') as outfile:
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
@@ -434,74 +438,42 @@ def normalize2dArray(distm):
 
 
 def normalizedSourcePortDistance(values):
-    ndistmS = []
-
     dataValuesLength = len(values)
     filename = 'sportDist' + addition + '.txt'
-    distm = [x[:] for x in [[-1] * dataValuesLength] * dataValuesLength]
 
-    ngrams = []
-    for a in range(len(values)):
-        profile = dict()
+    ngrams = generateNGrams(3, values)
 
-        dat = [x[3] for x in values[a]]
+    cosineDistanceSourcePort = generateCosineDistanceFromNGrams(ngrams, dataValuesLength)
 
-        li = zip(dat, dat[1:], dat[2:])
-        for b in li:
-            if b not in profile.keys():
-                profile[b] = 0
+    with open(outputDir + filename, 'w') as outfile:
+        for a in range(len(cosineDistanceSourcePort)):
+            outfile.write(' '.join([str(e) for e in cosineDistanceSourcePort[a]]) + "\n")
 
-            profile[b] += 1
-
-        ngrams.append(profile)
-    assert len(ngrams) == len(values)
-    for a in range(len(ngrams)):
-        for b in range(a, len(ngrams)):
-            if a == b:
-                distm[a][b] = 0.0
-
-            i = ngrams[a]
-            j = ngrams[b]
-            ngram_all = list(set(i.keys()) | set(j.keys()))
-            i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
-            j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
-
-            dist = cosine(i_vec, j_vec)
-            distm[a][b] = dist
-            distm[b][a] = dist
-    with open(filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-    for a in range(len(distm)):
-        ndistmS.append([])
-        for b in range(len(distm)):
-            ndistmS[a].append(distm[a][b])
-
-    return ndistmS
+    return cosineDistanceSourcePort
 
 
 def normalizedDestinationPortDistance(values):
-    ndistmD = []
-
     dataValuesLength = len(values)
     filename = 'dportDist' + addition + '.txt'
-    distm = [x[:] for x in [[-1] * dataValuesLength] * dataValuesLength]
 
-    ngrams = []
-    for a in range(dataValuesLength):
-        profile = dict()
-        dat = [x[4] for x in values[a]]
-
-        li = zip(dat, dat[1:], dat[2:])
-
-        for b in li:
-            if b not in profile.keys():
-                profile[b] = 0
-            profile[b] += 1
-        ngrams.append(profile)
+    ngrams = generateNGrams(4, values)
 
     assert len(ngrams) == dataValuesLength
+
+    cosineDistanceDestinationPort = generateCosineDistanceFromNGrams(ngrams, dataValuesLength)
+
+    with open(outputDir + filename, 'w') as outfile:
+        for a in range(len(cosineDistanceDestinationPort)):
+            outfile.write(' '.join([str(e) for e in cosineDistanceDestinationPort[a]]) + "\n")
+
+    return cosineDistanceDestinationPort
+
+
+def generateCosineDistanceFromNGrams(ngrams, dataValuesLength):
+    assert len(ngrams) == dataValuesLength
+
+    distm = np.zeros((dataValuesLength, dataValuesLength))
+
     for a in range(dataValuesLength):
         for b in range(a, dataValuesLength):
             if a == b:
@@ -509,23 +481,33 @@ def normalizedDestinationPortDistance(values):
             else:
                 i = ngrams[a]
                 j = ngrams[b]
+
                 ngram_all = list(set(i.keys()) | set(j.keys()))
-                i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
-                j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
-                dist = round(cosine(i_vec, j_vec), 8)
+                i_vec = np.array([(i[item] if item in i.keys() else 0) for item in ngram_all])
+                j_vec = np.array([(j[item] if item in j.keys() else 0) for item in ngram_all])
+
+                dist = 1 - fastdist.cosine(i_vec, j_vec)
+
                 distm[a][b] = dist
                 distm[b][a] = dist
 
-    with open(filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    return distm
 
-    for a in range(len(distm)):
-        ndistmD.append([])
-        for b in range(len(distm)):
-            ndistmD[a].append(distm[a][b])
 
-    return ndistmD
+def generateNGrams(index, values):
+    ngrams = []
+    for a in range(len(values)):
+        profile = dict()
+
+        dat = [x[index] for x in values[a]]
+
+        li = zip(dat, dat[1:], dat[2:])
+        for b in li:
+            if b not in profile.keys():
+                profile[b] = 0
+            profile[b] += 1
+        ngrams.append(profile)
+    return ngrams
 
 
 def difference(str1, str2):
@@ -540,9 +522,7 @@ def inet_to_str(inet: bytes) -> str:
         return socket.inet_ntop(socket.AF_INET6, inet)
 
 
-def readpcap(filename):
-    print("Reading", os.path.basename(filename))
-
+def readPCAP(filename):
     counter = 0
     connections = {}
     previousTimestamp = {}
@@ -605,7 +585,7 @@ def readpcap(filename):
     return connections
 
 
-def readfolder(maxConnections=500, useCache=False):
+def readFolderWithPCAPs(maxConnections=500, slidingWindow=6, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
@@ -618,12 +598,22 @@ def readfolder(maxConnections=500, useCache=False):
             mapping = pickle.load(file)
     else:
         for f in files:
-            connections = timeFunction(readpcap.__name__, lambda: readpcap(f))
-
-            if len(connections.items()) < 1:
-                continue
-
             key = os.path.basename(f)
+            cacheName = f'data/pcap-{key}.pkl'
+            if os.path.exists(cacheName) and useFileCache:
+                print(f'Using cache: {key}')
+                with open(cacheName, 'rb') as file:
+                    connections = pickle.load(file)
+            else:
+                print(f'Reading file: {key}')
+                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f))
+
+                if len(connections.items()) < 1:
+                    continue
+
+                with open(cacheName, 'wb') as file:
+                    pickle.dump(connections, file)
+
             fno = 0
 
             for i, v in connections.items():
@@ -632,7 +622,7 @@ def readfolder(maxConnections=500, useCache=False):
 
                 amountOfPackages = len(v)
                 for window in range(amountOfPackages // thresh):
-                    if window >= 3:
+                    if window >= slidingWindow:
                         break
                     name = key + i[0] + "->" + i[1] + ":" + str(window)
                     mapping[name] = fno
@@ -649,8 +639,11 @@ def readfolder(maxConnections=500, useCache=False):
     print('Done reading pcaps...')
     print('Collective surviving connections ', len(meta))
 
-    timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
+    if len(meta) < 50:
+        print('Too little connections to create clustering')
+        raise ValueError
 
+    return meta, mapping
 
 def timeFunction(name, fun):
     print(f"Started {name}...")
@@ -661,29 +654,6 @@ def timeFunction(name, fun):
     return value
 
 
-def readfile(f):
-    print('About to read pcap...')
-    connections = timeFunction(readpcap.__name__, lambda: readpcap(f))
-    print('Done reading pcaps...')
-
-    if len(connections.items()) < 1:
-        return
-
-    meta = {}
-    mapping = {}
-
-    fno = 0
-    for i, v in connections.items():
-        name = i[0] + "->" + i[1]
-        mapping[name] = fno
-        fno += 1
-        meta[name] = v[:thresh]
-
-    connectionSummary(connections)
-
-    timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
-
-
 def connectionSummary(connections):
     connectionLengths = [len(x) for i, x in connections.items()]
     print("Average conn length: ", np.mean(connectionLengths))
@@ -692,12 +662,15 @@ def connectionSummary(connections):
     print('----------------')
 
 
+def execute():
+    meta, mapping = timeFunction(readFolderWithPCAPs.__name__, lambda: readFolderWithPCAPs())
+    timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
+
+
 def main():
     if len(sys.argv) < 2:
         print('incomplete command')
-    elif sys.argv[1] == 'file':
-        readfile(sys.argv[2])
     elif sys.argv[1] == 'folder':
-        readfolder()
+        timeFunction("totalRuntime", lambda: execute())
     else:
         print('incomplete command')
