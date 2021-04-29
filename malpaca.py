@@ -892,7 +892,7 @@ def readpcap(filename):
     packetspersecond=[]
     bytesperhost = {}
     count = 0
-    prev = -1
+    previousTimestamp = {}
     bytespersec = 0
     gaps = []
     incoming = []
@@ -902,14 +902,6 @@ def readpcap(filename):
     f = open(filename, 'rb')
     pcap = dpkt.pcap.Reader(f)
     for ts, pkt in pcap:
-                #try:
-                timestamp = (datetime.datetime.utcfromtimestamp(ts))
-                gap = 0.0 if prev==-1 else round(float((timestamp-prev).microseconds)/float(1000),3)
-                #print gap
-                if prev == -1:
-                    period = timestamp
-
-                prev = timestamp
                 counter+=1
                 eth= None
                 bla += 1
@@ -923,17 +915,27 @@ def readpcap(filename):
 
                 ip=eth.data
 
-        
+                src_ip = inet_to_str(ip.src)
+                dst_ip = inet_to_str(ip.dst)
+
+                key = (src_ip, dst_ip)
+
+                timestamp = datetime.datetime.utcfromtimestamp(ts)
+
+                if key in previousTimestamp:
+                    gap = (timestamp - previousTimestamp[key]).microseconds / 1000
+                else:
+                    gap = 0
+
+                previousTimestamp[key] = timestamp
+
                 tupple = (gap, ip.len, ip.p)
-              
+
                 gaps.append(tupple)
 
-
-                src_ip= inet_to_str(ip.src)
-                dst_ip = inet_to_str(ip.dst)
-                #print(src_ip, dst_ip)
                 sport = 0
                 dport = 0
+
                 try:
                     if ip.p==dpkt.ip.IP_PROTO_TCP or ip.p==dpkt.ip.IP_PROTO_UDP:
                         sport = ip.data.sport
@@ -941,9 +943,9 @@ def readpcap(filename):
                 except:
                     continue
 
-                if (src_ip, dst_ip) not in connections.keys():
-                    connections[(src_ip, dst_ip)] = []
-                connections[(src_ip,dst_ip)].append((gap, ip.len, ip.p, sport, dport))
+                if key not in connections.keys():
+                    connections[key] = []
+                connections[key].append((gap, ip.len, ip.p, sport, dport))
                 
 
                 
