@@ -2,16 +2,15 @@
 import csv
 import datetime
 import glob
-import multiprocessing
 import os
 import pickle
 import shutil
 import socket
 import sys
-import threading
 import time
 from collections import deque
-from multiprocessing import shared_memory
+from dataclasses import dataclass
+from typing import TypeVar, Callable
 
 import dpkt
 import hdbscan
@@ -38,13 +37,21 @@ addition = '-' + expname + '-' + str(thresh)
 outputDir = 'output/'  # All files in this folder will be deleted
 
 
+@dataclass
+class PackageInfo:
+    gap: float
+    bytes: int
+    protocol: int
+    sourcePort: int
+    destinationPort: int
+
+
 # @profile
-def connlevel_sequence(metadata, mapping):
-    data = metadata
+def connlevel_sequence(metadata: dict[str, list[PackageInfo]], mapping):
     inv_mapping = {v: k for k, v in mapping.items()}
 
-    values = list(data.values())
-    keys = list(data.keys())
+    values = list(metadata.values())
+    keys = list(metadata.keys())
 
     # save intermediate results
     if os.path.exists(outputDir):
@@ -54,26 +61,31 @@ def connlevel_sequence(metadata, mapping):
         os.mkdir(outputDir)
     # ----- start porting -------
 
-    for n, feat in [(1, 'bytes'), (0, 'gaps'), (2, 'sport'), (3, 'dport')]:
+    for feat in ['bytes', 'gap', 'sourcePort', 'destinationPort']:
         with open(outputDir + feat + '-features' + addition, 'w') as f:
             for val in values:
-                vi = [str(x[n]) for x in val]
+                vi = [str(x.__getattribute__(feat)) for x in val]
                 f.write(','.join(vi))
                 f.write("\n")
 
     labels, normalizeDistanceMeasurementBytes = timeFunction(normalizedByteDistance.__name__,
-                                                             lambda: normalizedByteDistance(mapping, inv_mapping, keys, values))
+                                                             lambda: normalizedByteDistance(mapping, inv_mapping, keys,
+                                                                                            values))
 
-    normalizeDistanceMeasurementGaps = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(values))
+    normalizeDistanceMeasurementGaps = timeFunction(normalizedGapsDistance.__name__,
+                                                    lambda: normalizedGapsDistance(values))
 
-    normalizeDistanceMeasurementSourcePort = timeFunction(normalizedSourcePortDistance.__name__, lambda: normalizedSourcePortDistance(values))
+    normalizeDistanceMeasurementSourcePort = timeFunction(normalizedSourcePortDistance.__name__,
+                                                          lambda: normalizedSourcePortDistance(values))
 
-    normalizeDistanceMeasurementDestinationPort = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(values))
+    normalizeDistanceMeasurementDestinationPort = timeFunction(normalizedDestinationPortDistance.__name__,
+                                                               lambda: normalizedDestinationPortDistance(values))
 
-    normalizeDistanceMeasurement = timeFunction(normalizedDistanceMeasurement.__name__, lambda: normalizedDistanceMeasurement(normalizeDistanceMeasurementBytes,
-                                                                                                                              normalizeDistanceMeasurementDestinationPort,
-                                                                                                                              normalizeDistanceMeasurementGaps,
-                                                                                                                              normalizeDistanceMeasurementSourcePort))
+    normalizeDistanceMeasurement = timeFunction(normalizedDistanceMeasurement.__name__,
+                                                lambda: normalizedDistanceMeasurement(normalizeDistanceMeasurementBytes,
+                                                                                      normalizeDistanceMeasurementDestinationPort,
+                                                                                      normalizeDistanceMeasurementGaps,
+                                                                                      normalizeDistanceMeasurementSourcePort))
 
     clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
 
@@ -85,7 +97,8 @@ def connlevel_sequence(metadata, mapping):
 
     generateDag(clu.labels_, csv_file)
 
-    actualLabels, clusterInformation = timeFunction(generateHeatmaps.__name__, lambda: generateHeatmaps(csv_file, mapping, keys, values))
+    actualLabels, clusterInformation = timeFunction(generateHeatmaps.__name__,
+                                                    lambda: generateHeatmaps(csv_file, mapping, keys, values))
 
     timeFunction(generateGraphs.__name__, lambda: generateGraphs(actualLabels, clusterInformation, values))
 
@@ -143,9 +156,9 @@ def generateClusterGraph(labels, ndistm, projection):
     plt.savefig(outputDir + "clustering-result" + addition)
 
 
-def generateClusters(ndistm):
+def generateClusters(normalizeDistanceMeasurement):
     RS = 3072018
-    projection = TSNE(random_state=RS).fit_transform(ndistm)
+    projection = TSNE(random_state=RS).fit_transform(normalizeDistanceMeasurement)
     plt.scatter(*projection.T)
     plt.savefig(outputDir + "tsne-result" + addition)
     plt.close()
@@ -153,7 +166,7 @@ def generateClusters(ndistm):
     sample = 7
     model = hdbscan.HDBSCAN(min_cluster_size=size, min_samples=sample, cluster_selection_method='leaf',
                             metric='precomputed')
-    clu = model.fit(np.array([np.array(x) for x in ndistm]))  # final for citadel and dridex
+    clu = model.fit(np.array([np.array(x) for x in normalizeDistanceMeasurement]))  # final for citadel and dridex
     joblib.dump(clu, outputDir + 'model' + addition + '.pkl')
     print("num clusters: " + str(len(set(clu.labels_)) - 1))
     avg = 0.0
@@ -170,9 +183,9 @@ def generateHeatmaps(csv_file, mapping, keys, values):
     if not os.path.exists(outputDir + 'figs' + addition + '/'):
         os.mkdir(outputDir + 'figs' + addition + '/')
         os.mkdir(outputDir + 'figs' + addition + '/bytes')
-        os.mkdir(outputDir + 'figs' + addition + '/gaps')
-        os.mkdir(outputDir + 'figs' + addition + '/sport')
-        os.mkdir(outputDir + 'figs' + addition + '/dport')
+        os.mkdir(outputDir + 'figs' + addition + '/gap')
+        os.mkdir(outputDir + 'figs' + addition + '/sourcePort')
+        os.mkdir(outputDir + 'figs' + addition + '/destinationPort')
     actlabels = []
     for a in range(len(values)):
         actlabels.append(mapping[keys[a]])
@@ -192,18 +205,18 @@ def generateHeatmaps(csv_file, mapping, keys, values):
     return actlabels, clusterinfo
 
 
-def generateGraphs(actualLabels, clusterInfo, values):
+def generateGraphs(actualLabels, clusterInfo, values: list[list[PackageInfo]]):
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
 
-    for task in [(actualLabels, clusterInfo, values, "Packet sizes", "bytes", 1),
-                     (actualLabels, clusterInfo, values, "Interval", "gaps", 0),
-                     (actualLabels, clusterInfo, values, "Source Port", "sport", 2),
-                     (actualLabels, clusterInfo, values, "Dest. Port", "dport", 3)]:
+    for task in [(actualLabels, clusterInfo, values, "Packet sizes", "bytes"),
+                 (actualLabels, clusterInfo, values, "Interval", "gap"),
+                 (actualLabels, clusterInfo, values, "Source Port", "sourcePort"),
+                 (actualLabels, clusterInfo, values, "Dest. Port", "destinationPort")]:
         generateTheGraph(*task)
 
 
-def generateTheGraph(actlabels, clusterinfo, values, names, propertyName, q):
+def generateTheGraph(actlabels, clusterinfo, values: list[list[PackageInfo]], names, propertyName):
     for clusterNumber, cluster in clusterinfo.items():
         labels = [x[1] for x in cluster]
 
@@ -214,7 +227,7 @@ def generateTheGraph(actlabels, clusterinfo, values, names, propertyName, q):
         dataf = []
 
         for b in blah:
-            dataf.append([x[q] for x in b])
+            dataf.append([x.__getattribute__(propertyName) for x in b])
 
         df = pd.DataFrame(dataf, index=labels)
 
@@ -244,7 +257,7 @@ def generateTheGraph(actlabels, clusterinfo, values, names, propertyName, q):
         dataf = []
 
         for b in blah:
-            dataf.append([x[q] for x in b][:20])
+            dataf.append([x.__getattribute__(propertyName) for x in b][:20])
 
         df = pd.DataFrame(dataf, index=labelsnew)
         g = sns.heatmap(df, xticklabels=False)
@@ -392,17 +405,10 @@ def generateDag(labels, csv_file):
 
 
 def normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS):
-    normalizedDistanceMetric = []
-
-    for a in range(len(ndistmS)):
-        normalizedDistanceMetric.append([])
-        for b in range(len(ndistmS)):
-            normalizedDistanceMetric[a].append((ndistmB[a][b] + ndistmG[a][b] + ndistmD[a][b] + ndistmS[a][b]) / 4.0)
-
-    return normalizedDistanceMetric
+    return (ndistmB + ndistmD + ndistmG + ndistmS) / 4
 
 
-def normalizedByteDistance(mapping, inv_mapping, keys, values):
+def normalizedByteDistance(mapping, inv_mapping, keys, values: list[list[PackageInfo]]):
     dataValuesLength = len(values)
     filename = 'bytesDist' + addition + '.txt'
 
@@ -413,7 +419,7 @@ def normalizedByteDistance(mapping, inv_mapping, keys, values):
     for a in range(dataValuesLength):
         labels.append(mapping[keys[a]])
         ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
-        bytesDistances[a] = [x[1] for x in values[a]]
+        bytesDistances[a] = [x.bytes for x in values[a]]
 
     distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
@@ -427,17 +433,17 @@ def normalizedByteDistance(mapping, inv_mapping, keys, values):
     with open(outputDir + 'mapping' + addition + '.txt', 'w') as outfile:
         outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
 
-    return labels, normalize2dArray(distm)
+    return labels, distm / distm.max()
 
 
-def normalizedGapsDistance(values):
+def normalizedGapsDistance(values: list[list[PackageInfo]]):
     dataValuesLength = len(values)
     filename = 'gapsDist' + addition + '.txt'
 
     gapsDistances = np.zeros((dataValuesLength, thresh))
 
     for a in range(dataValuesLength):
-        gapsDistances[a] = [x[0] for x in values[a]]
+        gapsDistances[a] = [x.gap for x in values[a]]
 
     distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
@@ -445,58 +451,28 @@ def normalizedGapsDistance(values):
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
-    return normalize2dArray(distm)
+    return distm / distm.max()
 
 
-def normalize2dArray(distanceMetric):
-    normalizedDistanceMetric = []
-
-    mini = distanceMetric.min()
-    maxi = distanceMetric.max()
-    subtracted = maxi - mini
-
-    for a in range(len(distanceMetric)):
-        normalizedDistanceMetric.append([])
-        for b in range(len(distanceMetric)):
-            normalizedDistance = (distanceMetric[a][b] - mini) / subtracted
-            normalizedDistanceMetric[a].append(normalizedDistance)
-
-    return normalizedDistanceMetric
-
-
-def normalizedSourcePortDistance(values):
+def normalizedSourcePortDistance(values: list[list[PackageInfo]]):
     dataValuesLength = len(values)
     filename = 'sportDist' + addition + '.txt'
 
-    ngrams = generateNGrams(3, values)
+    ngrams = generateNGrams('sourcePort', values)
 
-    cosineDistanceSourcePort = generateCosineDistanceFromNGrams(ngrams, dataValuesLength)
-
-    with open(outputDir + filename, 'w') as outfile:
-        for a in range(len(cosineDistanceSourcePort)):
-            outfile.write(' '.join([str(e) for e in cosineDistanceSourcePort[a]]) + "\n")
-
-    return cosineDistanceSourcePort
+    return generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength)
 
 
-def normalizedDestinationPortDistance(values):
+def normalizedDestinationPortDistance(values: list[list[PackageInfo]]):
     dataValuesLength = len(values)
     filename = 'dportDist' + addition + '.txt'
 
-    ngrams = generateNGrams(4, values)
+    ngrams = generateNGrams('destinationPort', values)
 
-    assert len(ngrams) == dataValuesLength
-
-    cosineDistanceDestinationPort = generateCosineDistanceFromNGrams(ngrams, dataValuesLength)
-
-    with open(outputDir + filename, 'w') as outfile:
-        for a in range(len(cosineDistanceDestinationPort)):
-            outfile.write(' '.join([str(e) for e in cosineDistanceDestinationPort[a]]) + "\n")
-
-    return cosineDistanceDestinationPort
+    return generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength)
 
 
-def generateCosineDistanceFromNGrams(ngrams, dataValuesLength):
+def generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength):
     assert len(ngrams) == dataValuesLength
 
     distm = np.zeros((dataValuesLength, dataValuesLength))
@@ -518,15 +494,19 @@ def generateCosineDistanceFromNGrams(ngrams, dataValuesLength):
                 distm[a][b] = dist
                 distm[b][a] = dist
 
+    with open(outputDir + filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+
     return distm
 
 
-def generateNGrams(index, values):
+def generateNGrams(attribute, values: list[list[PackageInfo]]):
     ngrams = []
     for a in range(len(values)):
         profile = dict()
 
-        dat = [x[index] for x in values[a]]
+        dat = [x.__getattribute__(attribute) for x in values[a]]
 
         li = zip(dat, dat[1:], dat[2:])
         for b in li:
@@ -549,7 +529,7 @@ def inet_to_str(inet: bytes) -> str:
         return socket.inet_ntop(socket.AF_INET6, inet)
 
 
-def readPCAP(filename):
+def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
     counter = 0
     connections = {}
     previousTimestamp = {}
@@ -594,7 +574,7 @@ def readPCAP(filename):
                 source_port = 0
                 destination_port = 0
 
-            flow_data = (gap, level3.len, level3.p, source_port, destination_port)
+            flow_data = PackageInfo(gap, level3.len, level3.p, source_port, destination_port)
 
             if connections.get(key):
                 connections[key].append(flow_data)
@@ -612,7 +592,7 @@ def readPCAP(filename):
     return connections
 
 
-def readFolderWithPCAPs(maxConnections=1000, slidingWindow=50, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(maxConnections=1000, slidingWindow=100, useCache=False, useFileCache=False):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
@@ -673,7 +653,10 @@ def readFolderWithPCAPs(maxConnections=1000, slidingWindow=50, useCache=False, u
     return meta, mapping
 
 
-def timeFunction(name, fun):
+T = TypeVar('T')
+
+
+def timeFunction(name, fun: Callable[[], T]) -> T:
     print(f"Started {name}...")
     startTime = time.perf_counter()
     value = fun()
