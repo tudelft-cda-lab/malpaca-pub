@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import csv
+import dataclasses
 import datetime
 import glob
 import os
@@ -9,7 +10,6 @@ import socket
 import sys
 import time
 from collections import deque
-from dataclasses import dataclass
 from typing import TypeVar, Callable
 
 import dpkt
@@ -37,7 +37,7 @@ addition = '-' + expname + '-' + str(thresh)
 outputDir = 'output/'  # All files in this folder will be deleted
 
 
-@dataclass
+@dataclasses.dataclass()
 class PackageInfo:
     gap: float
     bytes: int
@@ -61,7 +61,8 @@ def connlevel_sequence(metadata: dict[str, list[PackageInfo]], mapping):
         os.mkdir(outputDir)
     # ----- start porting -------
 
-    for feat in ['bytes', 'gap', 'sourcePort', 'destinationPort']:
+    for field in dataclasses.fields(PackageInfo):
+        feat = field.name
         with open(outputDir + feat + '-features' + addition, 'w') as f:
             for val in values:
                 vi = [str(x.__getattribute__(feat)) for x in val]
@@ -209,11 +210,8 @@ def generateGraphs(actualLabels, clusterInfo, values: list[list[PackageInfo]]):
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
 
-    for task in [(actualLabels, clusterInfo, values, "Packet sizes", "bytes"),
-                 (actualLabels, clusterInfo, values, "Interval", "gap"),
-                 (actualLabels, clusterInfo, values, "Source Port", "sourcePort"),
-                 (actualLabels, clusterInfo, values, "Dest. Port", "destinationPort")]:
-        generateTheGraph(*task)
+    for task in [("Packet sizes", "bytes"), ("Interval", "gap"), ("Source Port", "sourcePort"), ("Dest. Port", "destinationPort")]:
+        generateTheGraph(actualLabels, clusterInfo, values, *task)
 
 
 def generateTheGraph(actlabels, clusterinfo, values: list[list[PackageInfo]], names, propertyName):
@@ -506,7 +504,7 @@ def generateNGrams(attribute, values: list[list[PackageInfo]]):
     for a in range(len(values)):
         profile = dict()
 
-        dat = [x.__getattribute__(attribute) for x in values[a]]
+        dat = [getattr(x, attribute) for x in values[a]]
 
         li = zip(dat, dat[1:], dat[2:])
         for b in li:
@@ -592,7 +590,7 @@ def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
     return connections
 
 
-def readFolderWithPCAPs(maxConnections=1000, slidingWindow=100, useCache=False, useFileCache=False):
+def readFolderWithPCAPs(maxConnections=1000, slidingWindow=100, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
