@@ -22,6 +22,8 @@ import seaborn as sns
 from fastdist import fastdist
 from sklearn.manifold import TSNE
 
+T = TypeVar('T')
+
 plt.rcParams.update({'figure.max_open_warning': 0})
 
 expname = 'exp'
@@ -548,15 +550,6 @@ def inet_to_str(inet: bytes) -> str:
         return socket.inet_ntop(socket.AF_INET6, inet)
 
 
-def mergeDict(dict1, dict2):
-    """Merge dictionaries and keep values of common keys in list"""
-    dict3 = {**dict1, **dict2}
-    for key, value in dict3.items():
-        if key in dict1 and key in dict2:
-            dict3[key] = [value, dict1[key]]
-    return dict3
-
-
 # Reads all the labeled data and stores it in a dictionary.
 # Key (a unidirectional connection) = pcap filename + sourceIP->destinationIP
 # Value = list of objects of connection properties
@@ -601,11 +594,11 @@ def readLabeled(filename) -> dict[LabelKey, ConnectionLabel]:
 
 def readFolderWithLabels(useCache=True, useFileCache=True):
     connsLabeled = {}
-    files = glob.glob(sys.argv[2] + "/bro/*.labeled")
+    files = glob.glob(sys.argv[2] + "/*.labeled")
     print('About to read labels...')
 
-    if os.path.exists('data/bro/connsLabels.pkl') and useCache:
-        with open('data/bro/connsLabels.pkl', 'rb') as file:
+    if os.path.exists('data/connsLabels.pkl') and useCache:
+        with open('data/connsLabels.pkl', 'rb') as file:
             connsLabeled = pickle.load(file)
     else:
         for f in files:
@@ -625,9 +618,7 @@ def readFolderWithLabels(useCache=True, useFileCache=True):
                 with open(cacheName, 'wb') as file:
                     pickle.dump(fileLabels, file)
 
-            connsLabeled = mergeDict(connsLabeled, fileLabels)
-
-        with open('data/bro/connsLabels.pkl', 'wb') as file:
+        with open('data/connsLabels.pkl', 'wb') as file:
             pickle.dump(connsLabeled, file)
 
     print('Done reading labels...')
@@ -763,9 +754,6 @@ def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=True):
         raise ValueError
 
     return meta, mapping
-
-
-T = TypeVar('T')
 
 
 def timeFunction(name, fun: Callable[[], T]) -> T:
