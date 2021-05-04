@@ -154,8 +154,10 @@ def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
                 className = connectionKey.name()
                 outfile.write(
                     f"{n},{mapping[connectionKey]},{final_probs[n][idx]},{className},{connectionKey.filename},{connectionKey.sourceIp},{connectionKey.destinationIp}\n")
+
                 if connectionKey.filename not in dagClusters:
                     dagClusters[connectionKey.filename] = []
+
                 dagClusters[connectionKey.filename].append((className, n))
                 heatmapClusters[n].append((mapping[connectionKey], className))
 
@@ -227,9 +229,6 @@ def generateClusters(normalizeDistanceMeasurement):
     model = hdbscan.HDBSCAN(min_cluster_size=size, min_samples=sample, cluster_selection_method='leaf',
                             metric='precomputed')
     clu = model.fit(np.array([np.array(x) for x in normalizeDistanceMeasurement]))  # final for citadel and dridex
-
-    with open(outputDirRaw + 'model' + addition + '.pkl', 'rb') as f:
-        pickle.dump(clu, f)
 
     print("num clusters: " + str(len(set(clu.labels_)) - 1))
     avg = 0.0
