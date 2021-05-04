@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 import csv
-import dataclasses
 import datetime
 import glob
 import os
@@ -10,7 +9,8 @@ import socket
 import sys
 import time
 from collections import deque
-from typing import TypeVar, Callable
+from dataclasses import dataclass, fields
+from typing import TypeVar, Callable, Optional
 
 import dpkt
 import hdbscan
@@ -37,33 +37,59 @@ addition = '-' + expname + '-' + str(thresh)
 outputDir = 'output/'  # All files in this folder will be deleted
 
 
-@dataclasses.dataclass()
+@dataclass(frozen=True)
+class ConnectionLabel:
+    isMalicious: bool
+    label: str
+
+
+@dataclass(frozen=True)
+class ConnectionKey:
+    filename: str
+    sourceIp: str
+    destinationIp: str
+    slice: int
+
+
+@dataclass(frozen=True)
+class LabelKey:
+    sourceIp: str
+    destinationIp: str
+    sourcePort: int
+    destinationPort: int
+
+
+@dataclass()
 class PackageInfo:
     gap: float
     bytes: int
     protocol: int
     sourcePort: int
     destinationPort: int
+    connectionLabel: Optional[ConnectionLabel]
 
 
 # @profile
-def connlevel_sequence(metadata: dict[str, list[PackageInfo]], mapping):
-    inv_mapping = {v: k for k, v in mapping.items()}
+def connlevel_sequence(metadata: dict[ConnectionKey, PackageInfo], mapping):
+    inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
-    values = list(metadata.values())
     keys = list(metadata.keys())
+    values = list(metadata.values())
 
     # save intermediate results
     if os.path.exists(outputDir):
         shutil.rmtree(outputDir)
         os.mkdir(outputDir)
+        os.mkdir(outputDir + "raw")
     else:
         os.mkdir(outputDir)
+        os.mkdir(outputDir + "raw")
+
     # ----- start porting -------
 
-    for field in dataclasses.fields(PackageInfo):
+    for field in fields(PackageInfo):
         feat = field.name
-        with open(outputDir + feat + '-features' + addition, 'w') as f:
+        with open(outputDir + 'raw/' + feat + '-features' + addition, 'w') as f:
             for val in values:
                 vi = [str(x.__getattribute__(feat)) for x in val]
                 f.write(','.join(vi))
@@ -94,45 +120,69 @@ def connlevel_sequence(metadata: dict[str, list[PackageInfo]], mapping):
 
     csv_file = 'clusters' + addition + '.csv'
 
-    timeFunction(saveClustersToCsv.__name__, lambda: saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping))
+    finalClusters = timeFunction(saveClustersToCsv.__name__, lambda: saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping, values))
+
+    finalClusterSummary(finalClusters, values)
 
     generateDag(clu.labels_, csv_file)
 
-    actualLabels, clusterInformation = timeFunction(generateHeatmaps.__name__,
-                                                    lambda: generateHeatmaps(csv_file, mapping, keys, values))
+    # actualLabels, clusterInformation = timeFunction(generateHeatmaps.__name__,
+    #                                                 lambda: generateHeatmaps(csv_file, mapping, keys, values))
 
-    timeFunction(generateGraphs.__name__, lambda: generateGraphs(actualLabels, clusterInformation, values))
+    # timeFunction(generateGraphs.__name__, lambda: generateGraphs(actualLabels, clusterInformation, values))
 
 
-def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping):
+def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping: dict[int, ConnectionKey], values):
     final_clusters = {}
     final_probs = {}
 
-    cluster_string = "clusters: "
     for lab in set(clu.labels_):
         occ = [i for i, x in enumerate(clu.labels_) if x == lab]
         final_probs[lab] = [x for i, x in zip(clu.labels_, clu.probabilities_) if i == lab]
-        cluster_string += str(lab) + ":" + str(len([labels[x] for x in occ])) + " items, "
         final_clusters[lab] = [labels[x] for x in occ]
-    print(cluster_string)
 
     with open(outputDir + csv_file, 'w') as outfile:
         outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
-        for n, clus in final_clusters.items():
-
-            for idx, el in enumerate([inv_mapping[x] for x in clus]):
-
-                ip = el.split('->')
-                if '-' in ip[0]:
-                    classname = el.split('-')[1]
-                else:
-                    classname = el.split('.pcap')[0]
-
-                filename = el.split('.pcap')[0]
-
+        for n, cluster in final_clusters.items():
+            for idx, connectionKey in enumerate([inv_mapping[x] for x in cluster]):
                 outfile.write(
-                    str(n) + "," + str(mapping[el]) + "," + str(final_probs[n][idx]) + "," + str(classname) + "," + str(
-                        filename) + "," + ip[0] + "," + ip[1] + "\n")
+                    str(n) + "," + str(mapping[connectionKey]) + "," + str(final_probs[n][idx]) + "," + str("<ClassName>") + "," + str(
+                        connectionKey.filename) + "," + connectionKey.sourceIp + "," + connectionKey.destinationIp + "\n")
+
+    return final_clusters
+
+
+def finalClusterSummary(finalClusters, values):
+    for n, cluster in finalClusters.items():
+        packages = []
+
+        for connectionNumber in cluster:
+            packages += values[connectionNumber]
+
+        summary = labelSummary(packages)
+        percentage = summary['percentage']
+        if percentage > 0:
+            print(f"cluster {n} is {percentage}% malicious, contains following labels: {summary['labels']}, connections: {len(cluster)}")
+        else:
+            print(f"cluster {n} does not contain any (known) malicious packages and {summary['unknown']} unknown, connections: {len(cluster)}")
+
+
+def labelSummary(packages: list[PackageInfo]):
+    summary = {'labels': set(), 'total': len(packages), 'malicious': 0, 'benign': 0, 'unknown': 0}
+
+    for package in packages:
+        if package.connectionLabel:
+            if package.connectionLabel.isMalicious:
+                summary['malicious'] += 1
+                summary['labels'].add(package.connectionLabel.label)
+            else:
+                summary['benign'] += 1
+        else:
+            summary['unknown'] += 1
+
+    summary.update({'percentage': summary['malicious'] / summary['total'] * 100})
+
+    return summary
 
 
 def generateClusterGraph(labels, ndistm, projection):
@@ -181,8 +231,8 @@ def generateClusters(normalizeDistanceMeasurement):
 
 def generateHeatmaps(csv_file, mapping, keys, values):
     print("writing temporal heatmaps")
-    if not os.path.exists(outputDir + 'figs' + addition + '/'):
-        os.mkdir(outputDir + 'figs' + addition + '/')
+    if not os.path.exists(outputDir + 'figs' + addition):
+        os.mkdir(outputDir + 'figs' + addition)
         os.mkdir(outputDir + 'figs' + addition + '/bytes')
         os.mkdir(outputDir + 'figs' + addition + '/gap')
         os.mkdir(outputDir + 'figs' + addition + '/sourcePort')
@@ -527,7 +577,94 @@ def inet_to_str(inet: bytes) -> str:
         return socket.inet_ntop(socket.AF_INET6, inet)
 
 
-def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
+def mergeDict(dict1, dict2):
+    """Merge dictionaries and keep values of common keys in list"""
+    dict3 = {**dict1, **dict2}
+    for key, value in dict3.items():
+        if key in dict1 and key in dict2:
+            dict3[key] = [value, dict1[key]]
+    return dict3
+
+
+# Reads all the labeled data and stores it in a dictionary.
+# Key (a unidirectional connection) = pcap filename + sourceIP->destinationIP
+# Value = list of objects of connection properties
+def readLabeled(filename) -> dict[LabelKey, ConnectionLabel]:
+    labelsFilename = filename.replace("pcap", "labeled")
+    if not os.path.exists(labelsFilename):
+        print(f"Label file for {filename} doesn't exist")
+        return {}
+
+    connectionLabels = {}
+
+    with open(labelsFilename, 'r') as f:
+        for line in f:
+            labelFields = line.split("\x09")
+
+            if len(labelFields) == 21:
+                sourceIp = labelFields[2]
+                sourcePort = int(labelFields[3])
+                destIp = labelFields[4]
+                destPort = int(labelFields[5])
+
+                labeling = labelFields[20].replace("(empty)", "").replace("-", "").strip(" ").strip(" \n").split("   ")
+
+                if labeling[0] == "Benign":
+                    isMalicious = False
+                    label = None
+                else:
+                    isMalicious = True
+                    label = labeling[1]
+
+                conn = ConnectionLabel(isMalicious, label)
+
+                key = LabelKey(sourceIp, destIp, sourcePort, destPort)
+
+                if key in connectionLabels and connectionLabels[key].label != label:
+                    print(f"Detected duplicate connection key: {key}, oldLabel: {connectionLabels[key].label}, newLabel: {label}")
+
+                connectionLabels[key] = conn
+
+    return connectionLabels
+
+
+def readFolderWithLabels(useCache=True, useFileCache=True):
+    connsLabeled = {}
+    files = glob.glob(sys.argv[2] + "/bro/*.labeled")
+    print('About to read labels...')
+
+    if os.path.exists('data/bro/connsLabels.pkl') and useCache:
+        with open('data/bro/connsLabels.pkl', 'rb') as file:
+            connsLabeled = pickle.load(file)
+    else:
+        for f in files:
+            cacheKey = os.path.basename(f)
+            cacheName = f'data/bro/{cacheKey}.pkl'
+            if os.path.exists(cacheName) and useFileCache:
+                print(f'Using cache: {cacheKey}')
+                with open(cacheName, 'rb') as file:
+                    fileLabels = pickle.load(file)
+            else:
+                print(f'Reading file: {cacheKey}')
+                fileLabels = timeFunction(readLabeled.__name__, lambda: readLabeled(f))
+
+                if len(fileLabels.items()) < 1:
+                    continue
+
+                with open(cacheName, 'wb') as file:
+                    pickle.dump(fileLabels, file)
+
+            connsLabeled = mergeDict(connsLabeled, fileLabels)
+
+        with open('data/bro/connsLabels.pkl', 'wb') as file:
+            pickle.dump(connsLabeled, file)
+
+    print('Done reading labels...')
+
+    return connsLabeled
+
+
+def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
     counter = 0
     connections = {}
     previousTimestamp = {}
@@ -572,7 +709,9 @@ def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
                 source_port = 0
                 destination_port = 0
 
-            flow_data = PackageInfo(gap, level3.len, level3.p, source_port, destination_port)
+            labelKey = LabelKey(src_ip, dst_ip, source_port, destination_port)
+
+            flow_data = PackageInfo(gap, level3.len, level3.p, source_port, destination_port, labels.get(labelKey))
 
             if connections.get(key):
                 connections[key].append(flow_data)
@@ -590,7 +729,7 @@ def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
     return connections
 
 
-def readFolderWithPCAPs(maxConnections=1000, slidingWindow=100, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(maxConnections=1000, slidingWindow=5, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
@@ -603,15 +742,16 @@ def readFolderWithPCAPs(maxConnections=1000, slidingWindow=100, useCache=False, 
             mapping = pickle.load(file)
     else:
         for f in files:
-            key = os.path.basename(f)
-            cacheName = f'data/pcap-{key}.pkl'
+            cacheKey = os.path.basename(f)
+            cacheName = f'data/{cacheKey}.pkl'
             if os.path.exists(cacheName) and useFileCache:
-                print(f'Using cache: {key}')
+                print(f'Using cache: {cacheKey}')
                 with open(cacheName, 'rb') as file:
                     connections = pickle.load(file)
             else:
-                print(f'Reading file: {key}')
-                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f))
+                print(f'Reading file: {cacheKey}')
+                labels = timeFunction(readLabeled.__name__, lambda: readLabeled(f))
+                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f, labels))
 
                 if len(connections.items()) < 1:
                     continue
@@ -629,10 +769,10 @@ def readFolderWithPCAPs(maxConnections=1000, slidingWindow=100, useCache=False, 
                 for window in range(amountOfPackages // thresh):
                     if window >= slidingWindow:
                         break
-                    name = key + i[0] + "->" + i[1] + ":" + str(window)
-                    mapping[name] = fno
+                    key = ConnectionKey(cacheKey, i[0], i[1], window)
+                    mapping[key] = fno
                     fno += 1
-                    meta[name] = v[thresh * window:thresh * (window + 1)]
+                    meta[key] = v[thresh * window:thresh * (window + 1)]
 
             connectionSummary(connections)
 
