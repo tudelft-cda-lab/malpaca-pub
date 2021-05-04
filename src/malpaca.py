@@ -8,6 +8,7 @@ import shutil
 import socket
 import sys
 import time
+import warnings
 from collections import deque
 from dataclasses import dataclass, fields
 from typing import TypeVar, Callable, Optional
@@ -26,6 +27,7 @@ from tqdm import tqdm
 T = TypeVar('T')
 
 plt.rcParams.update({'figure.max_open_warning': 0})
+warnings.filterwarnings("ignore", message="Attempting to set identical left == right")
 
 expname = 'exp'
 if len(sys.argv) > 3:
@@ -226,7 +228,7 @@ def finalClusterSummary(finalClusters, values):
         if percentage > 0:
             print(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
         else:
-            print(f"cluster {n} does not contain any (known) malicious packages, connections: {len(cluster)}")
+            print(f"cluster {n} does not contain any malicious packages, connections: {len(cluster)}")
 
 
 def labelSummary(packages: list[PackageInfo]):
@@ -324,7 +326,7 @@ def generateTheGraph(clusterNumber, cluster, actlabels, values: list[list[Packag
     else:
         plt.figure(figsize=(20.0, 27.0))
 
-    plt.suptitle("Exp: " + expname + " | Cluster: " + str(clusterNumber) + " | Feature: " + name)
+    plt.suptitle(f"Exp: {expname} | Cluster: {clusterNumber} | Feature: {name}")
 
     labelsnew = []
     lol = []
