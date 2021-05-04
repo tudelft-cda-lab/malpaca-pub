@@ -14,7 +14,6 @@ from typing import TypeVar, Callable, Optional
 
 import dpkt
 import hdbscan
-import joblib
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,6 +34,9 @@ if len(sys.argv) > 4:
 
 addition = '-' + expname + '-' + str(thresh)
 outputDir = 'output/'  # All files in this folder will be deleted
+outputDirRaw = outputDir + 'raw/'
+outputDirDist = outputDir + 'dist/'
+outputDirFigs = outputDir + 'figs' + addition
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,9 @@ class ConnectionKey:
     sourceIp: str
     destinationIp: str
     slice: int
+
+    def name(self):
+        return f"{self.sourceIp}->{self.destinationIp}:{self.slice}"
 
 
 @dataclass(frozen=True)
@@ -70,7 +75,7 @@ class PackageInfo:
 
 
 # @profile
-def connlevel_sequence(metadata: dict[ConnectionKey, PackageInfo], mapping):
+def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
     keys = list(metadata.keys())
@@ -79,34 +84,32 @@ def connlevel_sequence(metadata: dict[ConnectionKey, PackageInfo], mapping):
     # save intermediate results
     if os.path.exists(outputDir):
         shutil.rmtree(outputDir)
-        os.mkdir(outputDir)
-        os.mkdir(outputDir + "raw")
-    else:
-        os.mkdir(outputDir)
-        os.mkdir(outputDir + "raw")
 
+    os.mkdir(outputDir)
+    os.mkdir(outputDirRaw)
+    os.mkdir(outputDirDist)
+    os.mkdir(outputDirFigs)
+    os.mkdir(outputDirFigs + '/bytes')
+    os.mkdir(outputDirFigs + '/gap')
+    os.mkdir(outputDirFigs + '/sourcePort')
+    os.mkdir(outputDirFigs + '/destinationPort')
     # ----- start porting -------
 
     for field in fields(PackageInfo):
         feat = field.name
-        with open(outputDir + 'raw/' + feat + '-features' + addition, 'w') as f:
+        with open(outputDirRaw + feat + '-features' + addition, 'w') as f:
             for val in values:
                 vi = [str(x.__getattribute__(feat)) for x in val]
                 f.write(','.join(vi))
                 f.write("\n")
 
-    labels, normalizeDistanceMeasurementBytes = timeFunction(normalizedByteDistance.__name__,
-                                                             lambda: normalizedByteDistance(mapping, inv_mapping, keys,
-                                                                                            values))
+    normalizeDistanceMeasurementBytes = timeFunction(normalizedByteDistance.__name__, lambda: normalizedByteDistance(mapping, inv_mapping, keys, values))
 
-    normalizeDistanceMeasurementGaps = timeFunction(normalizedGapsDistance.__name__,
-                                                    lambda: normalizedGapsDistance(values))
+    normalizeDistanceMeasurementGaps = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(values))
 
-    normalizeDistanceMeasurementSourcePort = timeFunction(normalizedSourcePortDistance.__name__,
-                                                          lambda: normalizedSourcePortDistance(values))
+    normalizeDistanceMeasurementSourcePort = timeFunction(normalizedSourcePortDistance.__name__, lambda: normalizedSourcePortDistance(values))
 
-    normalizeDistanceMeasurementDestinationPort = timeFunction(normalizedDestinationPortDistance.__name__,
-                                                               lambda: normalizedDestinationPortDistance(values))
+    normalizeDistanceMeasurementDestinationPort = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(values))
 
     normalizeDistanceMeasurement = timeFunction(normalizedDistanceMeasurement.__name__,
                                                 lambda: normalizedDistanceMeasurement(normalizeDistanceMeasurementBytes,
@@ -116,24 +119,26 @@ def connlevel_sequence(metadata: dict[ConnectionKey, PackageInfo], mapping):
 
     clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
 
-    generateClusterGraph(clu.labels_, normalizeDistanceMeasurement, projection)
+    generateClusterGraph(clu.labels_, projection)
 
-    csv_file = 'clusters' + addition + '.csv'
+    finalClusters, dagClusters, heatmapCluster = timeFunction(saveClustersToCsv.__name__, lambda: saveClustersToCsv(clu, mapping, inv_mapping))
 
-    finalClusters = timeFunction(saveClustersToCsv.__name__, lambda: saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping, values))
+    clusterAmount = len(finalClusters)
 
     finalClusterSummary(finalClusters, values)
 
-    generateDag(clu.labels_, csv_file)
+    generateDag(dagClusters, clusterAmount)
 
-    # actualLabels, clusterInformation = timeFunction(generateHeatmaps.__name__,
-    #                                                 lambda: generateHeatmaps(csv_file, mapping, keys, values))
-
-    # timeFunction(generateGraphs.__name__, lambda: generateGraphs(actualLabels, clusterInformation, values))
+    timeFunction(generateGraphs.__name__, lambda: generateGraphs(heatmapCluster, values))
 
 
-def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping: dict[int, ConnectionKey], values):
+def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
+    csv_file = 'clusters' + addition + '.csv'
+    labels = list(range(len(mapping)))
+
     final_clusters = {}
+    dagClusters = {}
+    heatmapClusters = {}
     final_probs = {}
 
     for lab in set(clu.labels_):
@@ -144,12 +149,17 @@ def saveClustersToCsv(clu, csv_file, labels, mapping, inv_mapping: dict[int, Con
     with open(outputDir + csv_file, 'w') as outfile:
         outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
         for n, cluster in final_clusters.items():
+            heatmapClusters[n] = []
             for idx, connectionKey in enumerate([inv_mapping[x] for x in cluster]):
+                className = connectionKey.name()
                 outfile.write(
-                    str(n) + "," + str(mapping[connectionKey]) + "," + str(final_probs[n][idx]) + "," + str("<ClassName>") + "," + str(
-                        connectionKey.filename) + "," + connectionKey.sourceIp + "," + connectionKey.destinationIp + "\n")
+                    f"{n},{mapping[connectionKey]},{final_probs[n][idx]},{className},{connectionKey.filename},{connectionKey.sourceIp},{connectionKey.destinationIp}\n")
+                if connectionKey.filename not in dagClusters:
+                    dagClusters[connectionKey.filename] = []
+                dagClusters[connectionKey.filename].append((className, n))
+                heatmapClusters[n].append((mapping[connectionKey], className))
 
-    return final_clusters
+    return final_clusters, dagClusters, heatmapClusters
 
 
 def finalClusterSummary(finalClusters, values):
@@ -162,7 +172,7 @@ def finalClusterSummary(finalClusters, values):
         summary = labelSummary(packages)
         percentage = summary['percentage']
         if percentage > 0:
-            print(f"cluster {n} is {percentage}% malicious, contains following labels: {summary['labels']}, connections: {len(cluster)}")
+            print(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
         else:
             print(f"cluster {n} does not contain any (known) malicious packages and {summary['unknown']} unknown, connections: {len(cluster)}")
 
@@ -185,7 +195,7 @@ def labelSummary(packages: list[PackageInfo]):
     return summary
 
 
-def generateClusterGraph(labels, ndistm, projection):
+def generateClusterGraph(labels, projection):
     colors = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
               'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
               'maroon', 'deepskyblue', 'silver']
@@ -196,7 +206,6 @@ def generateClusterGraph(labels, ndistm, projection):
 
     col = [pal[x] for x in labels]
 
-    assert len(labels) == len(ndistm)
     plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.2)
     for i, txt in enumerate(labels):
         plt.scatter(projection.T[0][i], projection.T[1][i], color=col[i], alpha=0.6)
@@ -218,7 +227,10 @@ def generateClusters(normalizeDistanceMeasurement):
     model = hdbscan.HDBSCAN(min_cluster_size=size, min_samples=sample, cluster_selection_method='leaf',
                             metric='precomputed')
     clu = model.fit(np.array([np.array(x) for x in normalizeDistanceMeasurement]))  # final for citadel and dridex
-    joblib.dump(clu, outputDir + 'model' + addition + '.pkl')
+
+    with open(outputDirRaw + 'model' + addition + '.pkl', 'rb') as f:
+        pickle.dump(clu, f)
+
     print("num clusters: " + str(len(set(clu.labels_)) - 1))
     avg = 0.0
     for line in list(set(clu.labels_)):
@@ -226,40 +238,14 @@ def generateClusters(normalizeDistanceMeasurement):
             avg += sum([(1 if x == line else 0) for x in clu.labels_])
     print("average size of cluster:" + str(float(avg) / float(len(set(clu.labels_)) - 1)))
     print("samples in noise: " + str(sum([(1 if x == -1 else 0) for x in clu.labels_])))
+
     return clu, projection
 
 
-def generateHeatmaps(csv_file, mapping, keys, values):
-    print("writing temporal heatmaps")
-    if not os.path.exists(outputDir + 'figs' + addition):
-        os.mkdir(outputDir + 'figs' + addition)
-        os.mkdir(outputDir + 'figs' + addition + '/bytes')
-        os.mkdir(outputDir + 'figs' + addition + '/gap')
-        os.mkdir(outputDir + 'figs' + addition + '/sourcePort')
-        os.mkdir(outputDir + 'figs' + addition + '/destinationPort')
-    actlabels = []
-    for a in range(len(values)):
-        actlabels.append(mapping[keys[a]])
-    clusterinfo = {}
-    lines = open(outputDir + csv_file).readlines()[1:]
-    for line in lines:
-        li = line.split(",")  # clusnum, connnum, prob, srcip, dstip
-        srcip = li[5]
-        dstip = li[6][:-1]
-        has = int(li[1])
-
-        name = str('%12s->%12s' % (srcip, dstip))
-        if li[0] not in clusterinfo.keys():
-            clusterinfo[li[0]] = []
-        clusterinfo[li[0]].append((has, name))
-
-    return actlabels, clusterinfo
-
-
-def generateGraphs(actualLabels, clusterInfo, values: list[list[PackageInfo]]):
+def generateGraphs(clusterInfo, values: list[list[PackageInfo]]):
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
-
+    actualLabels = list(range(len(values)))
     for task in [("Packet sizes", "bytes"), ("Interval", "gap"), ("Source Port", "sourcePort"), ("Dest. Port", "destinationPort")]:
         generateTheGraph(actualLabels, clusterInfo, values, *task)
 
@@ -289,7 +275,7 @@ def generateTheGraph(actlabels, clusterinfo, values: list[list[PackageInfo]], na
         else:
             plt.figure(figsize=(20.0, 27.0))
 
-        plt.suptitle("Exp: " + expname + " | Cluster: " + clusterNumber + " | Feature: " + names)
+        plt.suptitle("Exp: " + expname + " | Cluster: " + str(clusterNumber) + " | Feature: " + names)
 
         labelsnew = []
         lol = []
@@ -311,27 +297,17 @@ def generateTheGraph(actlabels, clusterinfo, values: list[list[PackageInfo]], na
         g = sns.heatmap(df, xticklabels=False)
         plt.setp(g.get_yticklabels(), rotation=0)
         plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
-        plt.savefig(outputDir + "figs" + addition + "/" + propertyName + "/" + clusterNumber)
+        plt.savefig(outputDirFigs + "/" + propertyName + "/" + str(clusterNumber))
         plt.clf()
 
 
-def generateDag(labels, csv_file):
+def generateDag(dagClusters, clusterAmount):
     print('Producing DAG with relationships between pcaps')
-    clusters = {}
-    numclus = len(set(labels))
-    with open(outputDir + csv_file, 'r') as f1:
-        reader = csv.reader(f1, delimiter=',')
-        for i, line in enumerate(reader):
-            if i > 0:
-                if line[4] not in clusters.keys():
-                    clusters[line[4]] = []
-                clusters[line[4]].append((line[3], line[0]))  # classname, cluster#
-    f1.close()
-    array = [str(x) for x in range(numclus - 1)]
-    array.append("-1")
+
+    array = [x for x in range(-1, clusterAmount - 1)]
     treeprep = dict()
-    for filename, val in clusters.items():
-        arr = [0] * numclus
+    for filename, val in dagClusters.items():
+        arr = [0] * clusterAmount
         for fam, clus in val:
             ind = array.index(clus)
             arr[ind] = 1
@@ -343,6 +319,7 @@ def generateDag(labels, csv_file):
         if famname not in treeprep[mas].keys():
             treeprep[mas][famname] = set()
         treeprep[mas][famname].add(str(filename))
+
     with open(outputDir + 'mas-details' + addition + '.csv', 'w') as f2:
         for k, v in treeprep.items():
             for kv, vv in v.items():
@@ -359,7 +336,7 @@ def generateDag(labels, csv_file):
                 names[line[0]] = []
             names[line[0]].append(line[1] + "(" + line[2] + ")")
 
-    zeros = ''.join(['0'] * (numclus - 1))
+    zeros = ''.join(['0'] * (clusterAmount - 1))
     if zeros not in graph.keys():
         graph[zeros] = set()
 
@@ -460,28 +437,23 @@ def normalizedByteDistance(mapping, inv_mapping, keys, values: list[list[Package
     dataValuesLength = len(values)
     filename = 'bytesDist' + addition + '.txt'
 
-    labels = []
     ipmapping = []
     bytesDistances = np.zeros((dataValuesLength, thresh))
 
     for a in range(dataValuesLength):
-        labels.append(mapping[keys[a]])
         ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
         bytesDistances[a] = [x.bytes for x in values[a]]
 
     distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
-    with open(outputDir + filename, 'w') as outfile:
+    with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-    with open(outputDir + 'labels' + addition + '.txt', 'w') as outfile:
-        outfile.write(' '.join([str(l) for l in labels]) + '\n')
 
     with open(outputDir + 'mapping' + addition + '.txt', 'w') as outfile:
         outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
 
-    return labels, distm / distm.max()
+    return distm / distm.max()
 
 
 def normalizedGapsDistance(values: list[list[PackageInfo]]):
@@ -495,7 +467,7 @@ def normalizedGapsDistance(values: list[list[PackageInfo]]):
 
     distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
-    with open(outputDir + filename, 'w') as outfile:
+    with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
@@ -542,7 +514,7 @@ def generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength):
                 distm[a][b] = dist
                 distm[b][a] = dist
 
-    with open(outputDir + filename, 'w') as outfile:
+    with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
@@ -718,9 +690,9 @@ def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
             else:
                 connections[key] = [flow_data]
 
-        print(os.path.basename(filename), " num connections: ", len(connections))
         print('Before cleanup: Total packets: ', len(connections), ' connections.')
-        for k in list(connections.keys()):  # clean it up
+
+        for k in list(connections.keys()):
             if len(connections[k]) < thresh:
                 connections.pop(k)
 
@@ -729,7 +701,7 @@ def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
     return connections
 
 
-def readFolderWithPCAPs(maxConnections=1000, slidingWindow=5, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
@@ -760,6 +732,9 @@ def readFolderWithPCAPs(maxConnections=1000, slidingWindow=5, useCache=False, us
                     pickle.dump(connections, file)
 
             fno = 0
+
+            slidingWindow = maxConnections // len(connections)
+            print(f"Using slidingWindow {slidingWindow} for {len(connections)} connections")
 
             for i, v in connections.items():
                 if fno >= maxConnections:
