@@ -21,6 +21,7 @@ import pandas as pd
 import seaborn as sns
 from fastdist import fastdist
 from sklearn.manifold import TSNE
+from tqdm import tqdm
 
 T = TypeVar('T')
 
@@ -43,12 +44,25 @@ outputDirFigs = outputDir + 'figs' + addition
 
 @dataclass(frozen=True)
 class ConnectionLabel:
+    __slots__ = ['isMalicious', 'label']
     isMalicious: bool
     label: str
+
+    def __getstate__(self):
+        return dict(
+            (slot, getattr(self, slot))
+            for slot in self.__slots__
+            if hasattr(self, slot)
+        )
+
+    def __setstate__(self, state):
+        for slot, value in state.items():
+            object.__setattr__(self, slot, value)
 
 
 @dataclass(frozen=True)
 class ConnectionKey:
+    __slots__ = ['filename', 'sourceIp', 'destinationIp', 'slice']
     filename: str
     sourceIp: str
     destinationIp: str
@@ -57,23 +71,57 @@ class ConnectionKey:
     def name(self):
         return f"{self.sourceIp}->{self.destinationIp}:{self.slice}"
 
+    def __getstate__(self):
+        return dict(
+            (slot, getattr(self, slot))
+            for slot in self.__slots__
+            if hasattr(self, slot)
+        )
+
+    def __setstate__(self, state):
+        for slot, value in state.items():
+            object.__setattr__(self, slot, value)
+
 
 @dataclass(frozen=True)
 class LabelKey:
+    __slots__ = ['sourceIp', 'destinationIp', 'sourcePort', 'destinationPort']
     sourceIp: str
     destinationIp: str
     sourcePort: int
     destinationPort: int
 
+    def __getstate__(self):
+        return dict(
+            (slot, getattr(self, slot))
+            for slot in self.__slots__
+            if hasattr(self, slot)
+        )
+
+    def __setstate__(self, state):
+        for slot, value in state.items():
+            object.__setattr__(self, slot, value)
+
 
 @dataclass()
 class PackageInfo:
-    gap: float
+    __slots__ = ['gap', 'bytes', 'sourcePort', 'destinationPort', 'connectionLabel']
+    gap: int
     bytes: int
-    protocol: int
     sourcePort: int
     destinationPort: int
     connectionLabel: Optional[ConnectionLabel]
+
+    def __getstate__(self):
+        return dict(
+            (slot, getattr(self, slot))
+            for slot in self.__slots__
+            if hasattr(self, slot)
+        )
+
+    def __setstate__(self, state):
+        for slot, value in state.items():
+            object.__setattr__(self, slot, value)
 
 
 # @profile
@@ -178,11 +226,11 @@ def finalClusterSummary(finalClusters, values):
         if percentage > 0:
             print(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
         else:
-            print(f"cluster {n} does not contain any (known) malicious packages and {summary['unknown']} unknown, connections: {len(cluster)}")
+            print(f"cluster {n} does not contain any (known) malicious packages, connections: {len(cluster)}")
 
 
 def labelSummary(packages: list[PackageInfo]):
-    summary = {'labels': set(), 'total': len(packages), 'malicious': 0, 'benign': 0, 'unknown': 0}
+    summary = {'labels': set(), 'total': len(packages), 'malicious': 0, 'benign': 0}
 
     for package in packages:
         if package.connectionLabel:
@@ -191,8 +239,6 @@ def labelSummary(packages: list[PackageInfo]):
                 summary['labels'].add(package.connectionLabel.label)
             else:
                 summary['benign'] += 1
-        else:
-            summary['unknown'] += 1
 
     summary.update({'percentage': summary['malicious'] / summary['total'] * 100})
 
@@ -247,59 +293,61 @@ def generateGraphs(clusterInfo, values: list[list[PackageInfo]]):
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
     actualLabels = list(range(len(values)))
-    for task in [("Packet sizes", "bytes"), ("Interval", "gap"), ("Source Port", "sourcePort"), ("Dest. Port", "destinationPort")]:
-        generateTheGraph(actualLabels, clusterInfo, values, *task)
+    with tqdm(total=(4 * len(clusterInfo)), unit='graphs') as t:
+        for name, propertyName in [("Packet sizes", "bytes"), ("Interval", "gap"), ("Source Port", "sourcePort"), ("Dest. Port", "destinationPort")]:
+            for clusterNumber, cluster in clusterInfo.items():
+                t.set_description_str(f"Working on {name}, cluster #{clusterNumber}")
+                generateTheGraph(clusterNumber, cluster, actualLabels, values, name, propertyName)
+                t.update(1)
 
 
-def generateTheGraph(actlabels, clusterinfo, values: list[list[PackageInfo]], names, propertyName):
-    for clusterNumber, cluster in clusterinfo.items():
-        labels = [x[1] for x in cluster]
+def generateTheGraph(clusterNumber, cluster, actlabels, values: list[list[PackageInfo]], name, propertyName):
+    labels = [x[1] for x in cluster]
 
-        acha = [actlabels.index(int(x[0])) for x in cluster]
+    acha = [actlabels.index(int(x[0])) for x in cluster]
 
-        blah = [values[a] for a in acha]
+    blah = [values[a] for a in acha]
 
-        dataf = []
+    dataf = []
 
-        for b in blah:
-            dataf.append([x.__getattribute__(propertyName) for x in b])
+    for b in blah:
+        dataf.append([x.__getattribute__(propertyName) for x in b])
 
-        df = pd.DataFrame(dataf, index=labels)
+    df = pd.DataFrame(dataf, index=labels)
 
-        g = sns.clustermap(df, xticklabels=False, col_cluster=False)
-        ind = g.dendrogram_row.reordered_ind
+    g = sns.clustermap(df, xticklabels=False, col_cluster=False)
 
-        if df.shape[0] <= 50:
-            plt.figure(figsize=(10.0, 9.0))
-        elif df.shape[0] <= 100:
-            plt.figure(figsize=(15.0, 18.0))
-        else:
-            plt.figure(figsize=(20.0, 27.0))
+    if df.shape[0] <= 50:
+        plt.figure(figsize=(10.0, 9.0))
+    elif df.shape[0] <= 100:
+        plt.figure(figsize=(15.0, 18.0))
+    else:
+        plt.figure(figsize=(20.0, 27.0))
 
-        plt.suptitle("Exp: " + expname + " | Cluster: " + str(clusterNumber) + " | Feature: " + names)
+    plt.suptitle("Exp: " + expname + " | Cluster: " + str(clusterNumber) + " | Feature: " + name)
 
-        labelsnew = []
-        lol = []
-        for it in ind:
-            labelsnew.append(labels[it])
+    labelsnew = []
+    lol = []
+    for it in g.dendrogram_row.reordered_ind:
+        labelsnew.append(labels[it])
 
-            lol.append(cluster[[x[1] for x in cluster].index(labels[it])][0])
+        lol.append(cluster[[x[1] for x in cluster].index(labels[it])][0])
 
-        acha = [actlabels.index(int(x)) for x in lol]
+    acha = [actlabels.index(int(x)) for x in lol]
 
-        blah = [values[a] for a in acha]
+    blah = [values[a] for a in acha]
 
-        dataf = []
+    dataf = []
 
-        for b in blah:
-            dataf.append([x.__getattribute__(propertyName) for x in b][:20])
+    for b in blah:
+        dataf.append([x.__getattribute__(propertyName) for x in b][:20])
 
-        df = pd.DataFrame(dataf, index=labelsnew)
-        g = sns.heatmap(df, xticklabels=False)
-        plt.setp(g.get_yticklabels(), rotation=0)
-        plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
-        plt.savefig(outputDirFigs + "/" + propertyName + "/" + str(clusterNumber))
-        plt.clf()
+    df = pd.DataFrame(dataf, index=labelsnew)
+    g = sns.heatmap(df, xticklabels=False)
+    plt.setp(g.get_yticklabels(), rotation=0)
+    plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
+    plt.savefig(outputDirFigs + "/" + propertyName + "/" + str(clusterNumber))
+    plt.clf()
 
 
 def generateDag(dagClusters, clusterAmount):
@@ -550,10 +598,7 @@ def inet_to_str(inet: bytes) -> str:
         return socket.inet_ntop(socket.AF_INET6, inet)
 
 
-# Reads all the labeled data and stores it in a dictionary.
-# Key (a unidirectional connection) = pcap filename + sourceIP->destinationIP
-# Value = list of objects of connection properties
-def readLabeled(filename) -> dict[LabelKey, ConnectionLabel]:
+def readLabeled(filename) -> dict[int, ConnectionLabel]:
     labelsFilename = filename.replace("pcap", "labeled")
     if not os.path.exists(labelsFilename):
         print(f"Label file for {filename} doesn't exist")
@@ -561,33 +606,37 @@ def readLabeled(filename) -> dict[LabelKey, ConnectionLabel]:
 
     connectionLabels = {}
 
+    line_count = 0
     with open(labelsFilename, 'r') as f:
-        for line in f:
+        for _ in f:
+            line_count += 1
+
+    with open(labelsFilename, 'r') as f:
+        for line in tqdm(f, total=line_count, unit='lines', unit_scale=True, postfix=labelsFilename, mininterval=0.5):
             labelFields = line.split("\x09")
 
-            if len(labelFields) == 21:
-                sourceIp = labelFields[2]
-                sourcePort = int(labelFields[3])
-                destIp = labelFields[4]
-                destPort = int(labelFields[5])
+            if len(labelFields) != 21:
+                continue
 
-                labeling = labelFields[20].replace("(empty)", "").replace("-", "").strip(" ").strip(" \n").split("   ")
+            sourceIp = labelFields[2]
+            sourcePort = int(labelFields[3])
+            destIp = labelFields[4]
+            destPort = int(labelFields[5])
 
-                if labeling[0] == "Benign":
-                    isMalicious = False
-                    label = None
-                else:
-                    isMalicious = True
-                    label = labeling[1]
+            labeling = labelFields[20].replace("(empty)", "").replace("-", "").strip(" ").strip(" \n").split("   ")
 
-                conn = ConnectionLabel(isMalicious, label)
+            if labeling[0] == "Benign":
+                isMalicious = False
+                label = None
+            else:
+                isMalicious = True
+                label = labeling[1]
 
-                key = LabelKey(sourceIp, destIp, sourcePort, destPort)
+            key = LabelKey(sourceIp, destIp, sourcePort, destPort).__hash__()
 
-                if key in connectionLabels and connectionLabels[key].label != label:
-                    print(f"Detected duplicate connection key: {key}, oldLabel: {connectionLabels[key].label}, newLabel: {label}")
+            connectionLabels[key] = ConnectionLabel(isMalicious, label)
 
-                connectionLabels[key] = conn
+    print(f'Done reading {len(connectionLabels)} labels...')
 
     return connectionLabels
 
@@ -621,25 +670,25 @@ def readFolderWithLabels(useCache=True, useFileCache=True):
         with open('data/connsLabels.pkl', 'wb') as file:
             pickle.dump(connsLabeled, file)
 
-    print('Done reading labels...')
+    print(f'Done reading {len(connsLabeled)} labels...')
 
     return connsLabeled
 
 
 def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
-    counter = 0
     connections = {}
     previousTimestamp = {}
 
+    count = 0
     with open(filename, 'rb') as f:
         pcap = dpkt.pcap.Reader(f)
-        for ts, pkt in pcap:
-            counter += 1
+        for ts, pkt in tqdm(pcap, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
             try:
                 eth = dpkt.ethernet.Ethernet(pkt)
             except:
                 continue
 
+            count += 1
             level3 = eth.data
 
             if type(level3) is not dpkt.ip.IP:
@@ -655,7 +704,7 @@ def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
             timestamp = datetime.datetime.utcfromtimestamp(ts)
 
             if key in previousTimestamp:
-                gap = (timestamp - previousTimestamp[key]).microseconds / 1000
+                gap = round((timestamp - previousTimestamp[key]).microseconds)
             else:
                 gap = 0
 
@@ -668,30 +717,24 @@ def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
                 source_port = level4.sport
                 destination_port = level4.dport
             else:
-                source_port = 0
-                destination_port = 0
+                continue
 
-            labelKey = LabelKey(src_ip, dst_ip, source_port, destination_port)
+            labelHash = LabelKey(src_ip, dst_ip, source_port, destination_port).__hash__()
+            labelHashAlt = LabelKey(dst_ip, src_ip, destination_port, source_port).__hash__()
 
-            flow_data = PackageInfo(gap, level3.len, level3.p, source_port, destination_port, labels.get(labelKey))
+            flow_data = PackageInfo(gap, level3.len, source_port, destination_port, labels.get(labelHash) or labels.get(labelHashAlt))
 
-            if connections.get(key):
-                connections[key].append(flow_data)
-            else:
-                connections[key] = [flow_data]
+            if not connections.get(key):
+                connections[key] = []
 
-        print('Before cleanup: Total packets: ', len(connections), ' connections.')
+            connections[key].append(flow_data)
 
-        for k in list(connections.keys()):
-            if len(connections[k]) < thresh:
-                connections.pop(k)
+    print('Before cleanup: Total packets: ', len(connections), ' connections.')
 
-        print("Remaining connections after clean up ", len(connections))
-
-    return connections
+    return {key: value for (key, value) in connections.items() if len(value) >= thresh}
 
 
-def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(maxConnections=2000, useCache=True, useFileCache=True):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
