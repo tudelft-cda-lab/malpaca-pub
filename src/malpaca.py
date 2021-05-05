@@ -85,26 +85,6 @@ class ConnectionKey:
             object.__setattr__(self, slot, value)
 
 
-@dataclass(frozen=True)
-class LabelKey:
-    __slots__ = ['sourceIp', 'destinationIp', 'sourcePort', 'destinationPort']
-    sourceIp: str
-    destinationIp: str
-    sourcePort: int
-    destinationPort: int
-
-    def __getstate__(self):
-        return dict(
-            (slot, getattr(self, slot))
-            for slot in self.__slots__
-            if hasattr(self, slot)
-        )
-
-    def __setstate__(self, state):
-        for slot, value in state.items():
-            object.__setattr__(self, slot, value)
-
-
 @dataclass()
 class PackageInfo:
     __slots__ = ['gap', 'bytes', 'sourcePort', 'destinationPort', 'connectionLabel']
@@ -624,19 +604,11 @@ def readLabeled(filename) -> dict[int, ConnectionLabel]:
             sourcePort = int(labelFields[3])
             destIp = labelFields[4]
             destPort = int(labelFields[5])
+            labeling = labelFields[20].strip().split("   ")
 
-            labeling = labelFields[20].replace("(empty)", "").replace("-", "").strip(" ").strip(" \n").split("   ")
+            key = hash((sourceIp, destIp, sourcePort, destPort))
 
-            if labeling[0] == "Benign":
-                isMalicious = False
-                label = None
-            else:
-                isMalicious = True
-                label = labeling[1]
-
-            key = LabelKey(sourceIp, destIp, sourcePort, destPort).__hash__()
-
-            connectionLabels[key] = ConnectionLabel(isMalicious, label)
+            connectionLabels[key] = ConnectionLabel(labeling[1] != "Benign", labeling[2])
 
     print(f'Done reading {len(connectionLabels)} labels...')
 
@@ -678,10 +650,7 @@ def readFolderWithLabels(useCache=True, useFileCache=True):
 
 
 def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
-    connections = {}
-    previousTimestamp = {}
-
-    count = 0
+    preProcessed = {}
     with open(filename, 'rb') as f:
         pcap = dpkt.pcap.Reader(f)
         for ts, pkt in tqdm(pcap, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
@@ -690,53 +659,83 @@ def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
             except:
                 continue
 
-            count += 1
             level3 = eth.data
 
             if type(level3) is not dpkt.ip.IP:
                 continue
 
-            level4 = level3.data
+            key = hash((level3.src, level3.dst))
 
-            src_ip = inet_to_str(level3.src)
-            dst_ip = inet_to_str(level3.dst)
+            if not preProcessed.get(key):
+                preProcessed[key] = []
 
-            key = (src_ip, dst_ip)
+            preProcessed[key].append((ts, pkt))
 
-            timestamp = datetime.datetime.utcfromtimestamp(ts)
+    print(f'Before cleanup: {len(preProcessed)} connections.')
 
-            if key in previousTimestamp:
-                gap = round((timestamp - previousTimestamp[key]).microseconds)
-            else:
-                gap = 0
+    flattened = []
+    for values in preProcessed.values():
+        if len(values) < thresh:
+            continue
+        for package in values:
+            flattened.append(package)
+    del preProcessed
 
-            previousTimestamp[key] = timestamp
+    print(f'After cleanup: {len(flattened)} connections.')
 
-            if type(level4) is dpkt.tcp.TCP:
-                source_port = level4.sport
-                destination_port = level4.dport
-            elif type(level4) is dpkt.udp.UDP:
-                source_port = level4.sport
-                destination_port = level4.dport
-            else:
-                continue
+    connections = {}
+    previousTimestamp = {}
+    count = 0
 
-            labelHash = LabelKey(src_ip, dst_ip, source_port, destination_port).__hash__()
-            labelHashAlt = LabelKey(dst_ip, src_ip, destination_port, source_port).__hash__()
+    for ts, pkt in tqdm(flattened, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
+        try:
+            eth = dpkt.ethernet.Ethernet(pkt)
+        except:
+            continue
 
-            flow_data = PackageInfo(gap, level3.len, source_port, destination_port, labels.get(labelHash) or labels.get(labelHashAlt))
+        count += 1
+        level3 = eth.data
 
-            if not connections.get(key):
-                connections[key] = []
+        if type(level3) is not dpkt.ip.IP:
+            continue
 
-            connections[key].append(flow_data)
+        level4 = level3.data
 
-    print('Before cleanup: Total packets: ', len(connections), ' connections.')
+        src_ip = inet_to_str(level3.src)
+        dst_ip = inet_to_str(level3.dst)
 
-    return {key: value for (key, value) in connections.items() if len(value) >= thresh}
+        key = (src_ip, dst_ip)
+        timestamp = datetime.datetime.utcfromtimestamp(ts)
+
+        if key in previousTimestamp:
+            gap = round((timestamp - previousTimestamp[key]).microseconds)
+        else:
+            gap = 0
+
+        previousTimestamp[key] = timestamp
+
+        if type(level4) is dpkt.tcp.TCP:
+            source_port = level4.sport
+            destination_port = level4.dport
+        elif type(level4) is dpkt.udp.UDP:
+            source_port = level4.sport
+            destination_port = level4.dport
+        else:
+            continue
+
+        label = labels.get(hash((src_ip, dst_ip, source_port, destination_port))) or labels.get(hash((dst_ip, src_ip, destination_port, source_port)))
+
+        flow_data = PackageInfo(gap, level3.len, source_port, destination_port, label)
+
+        if not connections.get(key):
+            connections[key] = []
+
+        connections[key].append(flow_data)
+
+    return connections
 
 
-def readFolderWithPCAPs(maxConnections=2000, useCache=True, useFileCache=True):
+def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=False):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
@@ -758,6 +757,7 @@ def readFolderWithPCAPs(maxConnections=2000, useCache=True, useFileCache=True):
             else:
                 print(f'Reading file: {cacheKey}')
                 labels = timeFunction(readLabeled.__name__, lambda: readLabeled(f))
+                # labels = {}
                 connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f, labels))
 
                 if len(connections.items()) < 1:
