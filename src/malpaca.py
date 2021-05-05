@@ -9,7 +9,7 @@ import socket
 import sys
 import time
 import warnings
-from collections import deque
+from collections import deque, defaultdict
 from dataclasses import dataclass, fields
 from typing import TypeVar, Callable, Optional
 
@@ -45,24 +45,6 @@ outputDirFigs = outputDir + 'figs' + addition
 
 
 @dataclass(frozen=True)
-class ConnectionLabel:
-    __slots__ = ['isMalicious', 'label']
-    isMalicious: bool
-    label: str
-
-    def __getstate__(self):
-        return dict(
-            (slot, getattr(self, slot))
-            for slot in self.__slots__
-            if hasattr(self, slot)
-        )
-
-    def __setstate__(self, state):
-        for slot, value in state.items():
-            object.__setattr__(self, slot, value)
-
-
-@dataclass(frozen=True)
 class ConnectionKey:
     __slots__ = ['filename', 'sourceIp', 'destinationIp', 'slice']
     filename: str
@@ -85,14 +67,14 @@ class ConnectionKey:
             object.__setattr__(self, slot, value)
 
 
-@dataclass()
+@dataclass(frozen=True)
 class PackageInfo:
     __slots__ = ['gap', 'bytes', 'sourcePort', 'destinationPort', 'connectionLabel']
     gap: int
     bytes: int
     sourcePort: int
     destinationPort: int
-    connectionLabel: Optional[ConnectionLabel]
+    connectionLabel: Optional[str]
 
     def __getstate__(self):
         return dict(
@@ -216,9 +198,9 @@ def labelSummary(packages: list[PackageInfo]):
 
     for package in packages:
         if package.connectionLabel:
-            if package.connectionLabel.isMalicious:
+            if package.connectionLabel != '-':
                 summary['malicious'] += 1
-                summary['labels'].add(package.connectionLabel.label)
+                summary['labels'].add(package.connectionLabel)
             else:
                 summary['benign'] += 1
 
@@ -555,14 +537,12 @@ def generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength):
 def generateNGrams(attribute, values: list[list[PackageInfo]]):
     ngrams = []
     for a in range(len(values)):
-        profile = dict()
+        profile = defaultdict(int)
 
         dat = [getattr(x, attribute) for x in values[a]]
 
         li = zip(dat, dat[1:], dat[2:])
         for b in li:
-            if b not in profile.keys():
-                profile[b] = 0
             profile[b] += 1
         ngrams.append(profile)
     return ngrams
@@ -580,7 +560,7 @@ def inet_to_str(inet: bytes) -> str:
         return socket.inet_ntop(socket.AF_INET6, inet)
 
 
-def readLabeled(filename) -> dict[int, ConnectionLabel]:
+def readLabeled(filename) -> (dict[int, str], int):
     labelsFilename = filename.replace("pcap", "labeled")
     if not os.path.exists(labelsFilename):
         print(f"Label file for {filename} doesn't exist")
@@ -608,18 +588,19 @@ def readLabeled(filename) -> dict[int, ConnectionLabel]:
 
             key = hash((sourceIp, destIp, sourcePort, destPort))
 
-            connectionLabels[key] = ConnectionLabel(labeling[1] != "Benign", labeling[2])
+            connectionLabels[key] = labeling[2]
 
     print(f'Done reading {len(connectionLabels)} labels...')
 
-    return connectionLabels
+    return connectionLabels, line_count
 
 
-def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
-    preProcessed = {}
+def readPCAP(filename, labels, count=0) -> dict[tuple[str, str], list[PackageInfo]]:
+    preProcessed = defaultdict(list)
+
     with open(filename, 'rb') as f:
         pcap = dpkt.pcap.Reader(f)
-        for ts, pkt in tqdm(pcap, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
+        for ts, pkt in tqdm(pcap, total=count, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
             try:
                 eth = dpkt.ethernet.Ethernet(pkt)
             except:
@@ -632,9 +613,6 @@ def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
 
             key = hash((level3.src, level3.dst))
 
-            if not preProcessed.get(key):
-                preProcessed[key] = []
-
             preProcessed[key].append((ts, pkt))
 
     print(f'Before cleanup: {len(preProcessed)} connections.')
@@ -643,27 +621,20 @@ def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
     for values in preProcessed.values():
         if len(values) < thresh:
             continue
-        for package in values:
-            flattened.append(package)
+        flattened.extend(values)
     del preProcessed
 
-    print(f'After cleanup: {len(flattened)} connections.')
+    print(f'After cleanup: {len(flattened)} packages.')
 
-    connections = {}
+    connections = defaultdict(list)
     previousTimestamp = {}
     count = 0
 
     for ts, pkt in tqdm(flattened, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
-        try:
-            eth = dpkt.ethernet.Ethernet(pkt)
-        except:
-            continue
+        eth = dpkt.ethernet.Ethernet(pkt)
 
         count += 1
         level3 = eth.data
-
-        if type(level3) is not dpkt.ip.IP:
-            continue
 
         level4 = level3.data
 
@@ -693,15 +664,12 @@ def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
 
         flow_data = PackageInfo(gap, level3.len, source_port, destination_port, label)
 
-        if not connections.get(key):
-            connections[key] = []
-
         connections[key].append(flow_data)
 
     return connections
 
 
-def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=False):
+def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
     files = glob.glob(sys.argv[2] + "/*.pcap")
@@ -722,9 +690,8 @@ def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=False)
                     connections = pickle.load(file)
             else:
                 print(f'Reading file: {cacheKey}')
-                labels = timeFunction(readLabeled.__name__, lambda: readLabeled(f))
-                # labels = {}
-                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f, labels))
+                labels, lineCount = timeFunction(readLabeled.__name__, lambda: readLabeled(f))
+                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f, labels, lineCount))
 
                 if len(connections.items()) < 1:
                     continue
