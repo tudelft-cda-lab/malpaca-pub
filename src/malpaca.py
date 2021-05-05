@@ -615,40 +615,6 @@ def readLabeled(filename) -> dict[int, ConnectionLabel]:
     return connectionLabels
 
 
-def readFolderWithLabels(useCache=True, useFileCache=True):
-    connsLabeled = {}
-    files = glob.glob(sys.argv[2] + "/*.labeled")
-    print('About to read labels...')
-
-    if os.path.exists('data/connsLabels.pkl') and useCache:
-        with open('data/connsLabels.pkl', 'rb') as file:
-            connsLabeled = pickle.load(file)
-    else:
-        for f in files:
-            cacheKey = os.path.basename(f)
-            cacheName = f'data/bro/{cacheKey}.pkl'
-            if os.path.exists(cacheName) and useFileCache:
-                print(f'Using cache: {cacheKey}')
-                with open(cacheName, 'rb') as file:
-                    fileLabels = pickle.load(file)
-            else:
-                print(f'Reading file: {cacheKey}')
-                fileLabels = timeFunction(readLabeled.__name__, lambda: readLabeled(f))
-
-                if len(fileLabels.items()) < 1:
-                    continue
-
-                with open(cacheName, 'wb') as file:
-                    pickle.dump(fileLabels, file)
-
-        with open('data/connsLabels.pkl', 'wb') as file:
-            pickle.dump(connsLabeled, file)
-
-    print(f'Done reading {len(connsLabeled)} labels...')
-
-    return connsLabeled
-
-
 def readPCAP(filename, labels) -> dict[tuple[str, str], list[PackageInfo]]:
     preProcessed = {}
     with open(filename, 'rb') as f:
