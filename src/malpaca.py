@@ -89,26 +89,51 @@ class PackageInfo:
 
 
 # @profile
-def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping):
+def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=False):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
-    keys = list(metadata.keys())
     values = list(metadata.values())
 
     # save intermediate results
-    if os.path.exists(outputDir):
-        shutil.rmtree(outputDir)
-
-    os.mkdir(outputDir)
-    os.mkdir(outputDirRaw)
-    os.mkdir(outputDirDist)
-    os.mkdir(outputDirFigs)
-    os.mkdir(outputDirFigs + '/bytes')
-    os.mkdir(outputDirFigs + '/gap')
-    os.mkdir(outputDirFigs + '/sourcePort')
-    os.mkdir(outputDirFigs + '/destinationPort')
+    generateOutputFolders()
     # ----- start porting -------
 
+    storeRawData(values)
+
+    normalizeDistanceMeasurement = timeFunction(getStatisticalNormalizedDistanceMeasurement.__name__, lambda: getStatisticalNormalizedDistanceMeasurement(values))
+
+    clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
+
+    generateClusterGraph(clu.labels_, projection)
+
+    finalClusters, dagClusters, heatmapCluster = saveClustersToCsv(clu, mapping, inv_mapping)
+
+    finalClusterSummary(finalClusters, values)
+
+    if generateGraph:
+        clusterAmount = len(finalClusters)
+        generateDag(dagClusters, clusterAmount)
+        timeFunction(generateGraphs.__name__, lambda: generateGraphs(heatmapCluster, values))
+
+
+def getSequentialNormalizedDistanceMeasurement(values):
+    ndmBytes = normalizedByteDistance(values)
+    ndmGaps = normalizedGapsDistance(values)
+    ndmSourcePort = normalizedSourcePortDistance(values)
+    ndmDestinationPort = normalizedDestinationPortDistance(values)
+    return normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
+
+
+def getStatisticalNormalizedDistanceMeasurement(values):
+    ndmBytesAverage = normalizedStatisticalByteDistanceAverage(values)
+    ndmBytesMin = normalizedStatisticalByteDistanceMin(values)
+    ndmBytesMax = normalizedStatisticalByteDistanceMax(values)
+    ndmGaps = normalizedStatisticalGapsDistance(values)
+
+    return normalizedDistanceMeasurement(ndmGaps, ndmBytesAverage, ndmBytesMin, ndmBytesMax)
+
+
+def storeRawData(values):
     for field in fields(PackageInfo):
         feat = field.name
         with open(outputDirRaw + feat + '-features' + addition, 'w') as f:
@@ -117,33 +142,18 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
                 f.write(','.join(vi))
                 f.write("\n")
 
-    normalizeDistanceMeasurementBytes = timeFunction(normalizedByteDistance.__name__, lambda: normalizedByteDistance(mapping, inv_mapping, keys, values))
 
-    normalizeDistanceMeasurementGaps = timeFunction(normalizedGapsDistance.__name__, lambda: normalizedGapsDistance(values))
-
-    normalizeDistanceMeasurementSourcePort = timeFunction(normalizedSourcePortDistance.__name__, lambda: normalizedSourcePortDistance(values))
-
-    normalizeDistanceMeasurementDestinationPort = timeFunction(normalizedDestinationPortDistance.__name__, lambda: normalizedDestinationPortDistance(values))
-
-    normalizeDistanceMeasurement = timeFunction(normalizedDistanceMeasurement.__name__,
-                                                lambda: normalizedDistanceMeasurement(normalizeDistanceMeasurementBytes,
-                                                                                      normalizeDistanceMeasurementDestinationPort,
-                                                                                      normalizeDistanceMeasurementGaps,
-                                                                                      normalizeDistanceMeasurementSourcePort))
-
-    clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
-
-    generateClusterGraph(clu.labels_, projection)
-
-    finalClusters, dagClusters, heatmapCluster = timeFunction(saveClustersToCsv.__name__, lambda: saveClustersToCsv(clu, mapping, inv_mapping))
-
-    clusterAmount = len(finalClusters)
-
-    finalClusterSummary(finalClusters, values)
-
-    generateDag(dagClusters, clusterAmount)
-
-    timeFunction(generateGraphs.__name__, lambda: generateGraphs(heatmapCluster, values))
+def generateOutputFolders():
+    if os.path.exists(outputDir):
+        shutil.rmtree(outputDir)
+    os.mkdir(outputDir)
+    os.mkdir(outputDirRaw)
+    os.mkdir(outputDirDist)
+    os.mkdir(outputDirFigs)
+    os.mkdir(outputDirFigs + '/bytes')
+    os.mkdir(outputDirFigs + '/gap')
+    os.mkdir(outputDirFigs + '/sourcePort')
+    os.mkdir(outputDirFigs + '/destinationPort')
 
 
 def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
@@ -378,8 +388,6 @@ def generateDag(dagClusters, clusterAmount):
     nums = [sum([int(y) for y in x]) for x in notmain]
     notmain = [x for _, x in sorted(zip(nums, notmain))]
 
-    specials = notmain
-
     extras = set()
 
     for nm in notmain:
@@ -421,7 +429,7 @@ def generateDag(dagClusters, clusterAmount):
 
                 for line in li:
                     name += line + ',\n'
-                if idx not in specials:
+                if idx not in notmain:
                     text = str(idx) + " [label=\"" + name + "\" , shape=box;]"
                 else:  # treat in a special way. For now, leaving intact
                     text = str(idx) + " [shape=box label=\"" + name + "\"]"
@@ -442,20 +450,17 @@ def generateDag(dagClusters, clusterAmount):
         pass
 
 
-def normalizedDistanceMeasurement(ndistmB, ndistmD, ndistmG, ndistmS):
-    return (ndistmB + ndistmD + ndistmG + ndistmS) / 4
+def normalizedDistanceMeasurement(*args):
+    return sum(args) / len(args)
 
 
-def normalizedByteDistance(mapping, inv_mapping, keys, values: list[list[PackageInfo]]):
-    dataValuesLength = len(values)
+def normalizedByteDistance(values: list[list[PackageInfo]]):
     filename = 'bytesDist' + addition + '.txt'
 
-    ipmapping = []
-    bytesDistances = np.zeros((dataValuesLength, thresh))
+    bytesDistances = np.zeros((len(values), thresh))
 
-    for a in range(dataValuesLength):
-        ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
-        bytesDistances[a] = [x.bytes for x in values[a]]
+    for i, value in enumerate(values):
+        bytesDistances[i] = [x.bytes for x in value]
 
     distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
@@ -463,20 +468,66 @@ def normalizedByteDistance(mapping, inv_mapping, keys, values: list[list[Package
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
-    with open(outputDir + 'mapping' + addition + '.txt', 'w') as outfile:
-        outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
-
     return distm / distm.max()
 
 
 def normalizedGapsDistance(values: list[list[PackageInfo]]):
-    dataValuesLength = len(values)
     filename = 'gapsDist' + addition + '.txt'
 
-    gapsDistances = np.zeros((dataValuesLength, thresh))
+    gapsDistances = np.zeros((len(values), thresh))
 
-    for a in range(dataValuesLength):
-        gapsDistances[a] = [x.gap for x in values[a]]
+    for i, value in enumerate(values):
+        gapsDistances[i] = [x.gap for x in value]
+
+    distm = fastdist.cosine_pairwise_distance(gapsDistances, return_matrix=True)
+
+    with open(outputDirDist + filename, 'w') as outfile:
+        for a in range(len(distm)):
+            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+
+    return distm / distm.max()
+
+
+def normalizedStatisticalByteDistanceAverage(values: list[list[PackageInfo]]):
+    bytesDistances = np.zeros((len(values), 1))
+
+    for i, value in enumerate(values):
+        bytesDistances[i] = np.average([x.bytes for x in value])
+
+    distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
+
+    return distm / distm.max()
+
+
+def normalizedStatisticalByteDistanceMin(values: list[list[PackageInfo]]):
+    bytesDistances = np.zeros((len(values), 1))
+
+    for i, value in enumerate(values):
+        bytesDistances[i] = np.min([x.bytes for x in value])
+
+    distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
+
+    return distm / distm.max()
+
+
+def normalizedStatisticalByteDistanceMax(values: list[list[PackageInfo]]):
+    bytesDistances = np.zeros((len(values), 1))
+
+    for i, value in enumerate(values):
+        bytesDistances[i] = np.max([x.bytes for x in value])
+
+    distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
+
+    return distm / distm.max()
+
+
+def normalizedStatisticalGapsDistance(values: list[list[PackageInfo]]):
+    filename = 'gapsStatsDist' + addition + '.txt'
+
+    gapsDistances = np.zeros((len(values), 1))
+
+    for i, value in enumerate(values):
+        gapsDistances[i] = np.mean([x.gap for x in value])
 
     distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
@@ -488,25 +539,23 @@ def normalizedGapsDistance(values: list[list[PackageInfo]]):
 
 
 def normalizedSourcePortDistance(values: list[list[PackageInfo]]):
-    dataValuesLength = len(values)
     filename = 'sportDist' + addition + '.txt'
 
     ngrams = generateNGrams('sourcePort', values)
 
-    return generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength)
+    return generateCosineDistanceFromNGramsAndSave(filename, ngrams)
 
 
 def normalizedDestinationPortDistance(values: list[list[PackageInfo]]):
-    dataValuesLength = len(values)
     filename = 'dportDist' + addition + '.txt'
 
     ngrams = generateNGrams('destinationPort', values)
 
-    return generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength)
+    return generateCosineDistanceFromNGramsAndSave(filename, ngrams)
 
 
-def generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength):
-    assert len(ngrams) == dataValuesLength
+def generateCosineDistanceFromNGramsAndSave(filename, ngrams):
+    dataValuesLength = len(ngrams)
 
     distm = np.zeros((dataValuesLength, dataValuesLength))
 
@@ -536,10 +585,10 @@ def generateCosineDistanceFromNGramsAndSave(filename, ngrams, dataValuesLength):
 
 def generateNGrams(attribute, values: list[list[PackageInfo]]):
     ngrams = []
-    for a in range(len(values)):
+    for value in values:
         profile = defaultdict(int)
 
-        dat = [getattr(x, attribute) for x in values[a]]
+        dat = [getattr(x, attribute) for x in value]
 
         li = zip(dat, dat[1:], dat[2:])
         for b in li:
