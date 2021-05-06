@@ -100,7 +100,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     storeRawData(values)
 
-    normalizeDistanceMeasurement = timeFunction(getStatisticalNormalizedDistanceMeasurement.__name__, lambda: getStatisticalNormalizedDistanceMeasurement(values))
+    normalizeDistanceMeasurement = timeFunction(getSequentialNormalizedDistanceMeasurement.__name__, lambda: getSequentialNormalizedDistanceMeasurement(values))
 
     clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
 
@@ -715,12 +715,13 @@ def readPCAP(filename, labels, count=0) -> dict[tuple[str, str], list[PackageInf
 
         connections[key].append(flow_data)
 
-    return connections
+    return {key: value for (key, value) in connections.items() if len(value) >= thresh}
 
 
-def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(maxConnections=1000, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
+    mappingIndex = 0
     files = glob.glob(sys.argv[2] + "/*.pcap")
     print('About to read pcap...')
 
@@ -748,22 +749,17 @@ def readFolderWithPCAPs(maxConnections=2000, useCache=False, useFileCache=True):
                 with open(cacheName, 'wb') as file:
                     pickle.dump(connections, file)
 
-            fno = 0
-
             slidingWindow = maxConnections // len(connections)
             print(f"Using slidingWindow {slidingWindow} for {len(connections)} connections")
 
             for i, v in connections.items():
-                if fno >= maxConnections:
-                    break
-
                 amountOfPackages = len(v)
                 for window in range(amountOfPackages // thresh):
                     if window >= slidingWindow:
                         break
                     key = ConnectionKey(cacheKey, i[0], i[1], window)
-                    mapping[key] = fno
-                    fno += 1
+                    mapping[key] = mappingIndex
+                    mappingIndex += 1
                     meta[key] = v[thresh * window:thresh * (window + 1)]
 
             connectionSummary(connections)
