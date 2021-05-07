@@ -94,9 +94,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     values = list(metadata.values())
 
-    # save intermediate results
     generateOutputFolders()
-    # ----- start porting -------
 
     storeRawData(values)
 
@@ -121,6 +119,7 @@ def getSequentialNormalizedDistanceMeasurement(values):
     ndmGaps = normalizedGapsDistance(values)
     ndmSourcePort = normalizedSourcePortDistance(values)
     ndmDestinationPort = normalizedDestinationPortDistance(values)
+
     return normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
 
 
