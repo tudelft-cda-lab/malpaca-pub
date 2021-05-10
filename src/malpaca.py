@@ -22,11 +22,11 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from fastdist import fastdist
-from fastdtw import fastdtw
 from sklearn.manifold import TSNE
 from tqdm import tqdm
 
 from models import PackageInfo, ConnectionKey
+from fast_dtw import dtw_distance
 from statisticalMeasurements import getStatisticalNormalizedDistanceMeasurement
 
 T = TypeVar('T')
@@ -416,15 +416,15 @@ def normalizedByteDistance(values: list[list[PackageInfo]]):
     for i, value in enumerate(values):
         bytesDistances[i] = [x.bytes for x in value]
 
-    distm = np.zeros((lenth, lenth))
+    distm = dtw_distance(bytesDistances)
 
-    for i in tqdm(range(lenth)):
-        for j in range(i, lenth):
-            if i == j:
-                continue
-            distance = ownFastDtw(bytesDistances[i], bytesDistances[j])
-            distm[i][j] = distance
-            distm[j][i] = distance
+    # for i in tqdm(range(lenth)):
+    #     for j in range(i, lenth):
+    #         if i == j:
+    #             continue
+    #         distance = _dtw_distance(bytesDistances[i], bytesDistances[j])
+    #         distm[i][j] = distance
+    #         distm[j][i] = distance
 
     # distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
@@ -433,11 +433,6 @@ def normalizedByteDistance(values: list[list[PackageInfo]]):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     return distm / distm.max()
-
-
-def ownFastDtw(u, v):
-    distance, path = fastdtw(u, v)
-    return distance
 
 
 def normalizedGapsDistance(values: list[list[PackageInfo]]):
@@ -450,15 +445,17 @@ def normalizedGapsDistance(values: list[list[PackageInfo]]):
     for i, value in enumerate(values):
         gapsDistances[i] = [x.gap for x in value]
 
-    distm = np.zeros((lenth, lenth))
+    distm = dtw_distance(gapsDistances)
 
-    for i in tqdm(range(lenth)):
-        for j in range(i, lenth):
-            if i == j:
-                continue
-            distance = ownFastDtw(gapsDistances[i], gapsDistances[j])
-            distm[i][j] = distance
-            distm[j][i] = distance
+    # distm = np.zeros((lenth, lenth))
+    #
+    # for i in tqdm(range(lenth)):
+    #     for j in range(i, lenth):
+    #         if i == j:
+    #             continue
+    #         distance = _dtw_distance(gapsDistances[i], gapsDistances[j])
+    #         distm[i][j] = distance
+    #         distm[j][i] = distance
 
     # distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
@@ -493,19 +490,19 @@ def generateCosineDistanceFromNGramsAndSave(filename, ngrams):
     for a in tqdm(range(dataValuesLength)):
         for b in range(a, dataValuesLength):
             if a == b:
-                distm[a][b] = 0.0
-            else:
-                i = ngrams[a]
-                j = ngrams[b]
+                continue
 
-                ngram_all = list(set(i.keys()) | set(j.keys()))
-                i_vec = np.array([(i[item] if item in i.keys() else 0) for item in ngram_all])
-                j_vec = np.array([(j[item] if item in j.keys() else 0) for item in ngram_all])
+            i = ngrams[a]
+            j = ngrams[b]
 
-                dist = 1 - fastdist.cosine(i_vec, j_vec)
+            ngram_all = list(set(i.keys()) | set(j.keys()))
+            i_vec = np.array([(i[item] if item in i.keys() else 0) for item in ngram_all])
+            j_vec = np.array([(j[item] if item in j.keys() else 0) for item in ngram_all])
 
-                distm[a][b] = dist
-                distm[b][a] = dist
+            dist = 1 - fastdist.cosine(i_vec, j_vec)
+
+            distm[a][b] = dist
+            distm[b][a] = dist
 
     with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
@@ -649,7 +646,7 @@ def readPCAP(filename, labels, count=0) -> dict[tuple[str, str], list[PackageInf
     return {key: value for (key, value) in connections.items() if len(value) >= thresh}
 
 
-def readFolderWithPCAPs(perLabelThreshold=200, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(perLabelThreshold=2000, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
     selectedLabels = defaultdict(int)
@@ -702,7 +699,7 @@ def readFolderWithPCAPs(perLabelThreshold=200, useCache=False, useFileCache=True
                         labels.add(package.connectionLabel)
 
                     if len(labels) != 1:
-                        print("Got set with multiple labels", labels)
+                        # print("Got set with multiple labels", labels)
                         continue
 
                     label = labels.pop()
