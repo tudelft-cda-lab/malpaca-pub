@@ -97,7 +97,7 @@ def connlevel_sequence(metadata, mapping):
         dtw = rpackages.importr('IncDTW')
         r  = robjects.r
 
-    for n,feat in [(1, 'bytes'), (0, 'gaps'), (2, 'sport'), (3, 'dport')]:
+    for n,feat in [(1, 'bytes'), (0, 'gaps'), (3, 'sport'), (4, 'dport')]:
         f = open(feat+'-features'+addition, 'w')
         for val in values:
                 vi = [str(x[n]) for x in val]
@@ -811,7 +811,7 @@ def connlevel_sequence(metadata, mapping):
 
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size':10})
-    for names,sname,q in [("Packet sizes","bytes",1),("Interval","gaps",0),("Source Port","sport",2),("Dest. Port","dport",3)]:
+    for names,sname,q in [("Packet sizes","bytes",1),("Interval","gaps",0),("Source Port","sport",3),("Dest. Port","dport",4)]:
         for clusnum,cluster in clusterinfo.items():
             items = [int(x[0]) for x in cluster]
             labels = [x[1] for x in cluster]
