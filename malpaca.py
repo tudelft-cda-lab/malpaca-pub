@@ -167,11 +167,11 @@ def connlevel_sequence(metadata, mapping):
             distm = [[-1]*len(data.values()) for i in distm]
 
             for a in range(len(data.values())): #range(10):
-                #distm.append([])
+
 
                 labels.append(mapping[keys[a]])
                 ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
-                for b in range(len(data.values())):
+                for b in range(a+1):
                    
 
                     i = [x[1] for x in values[a]][:thresh]
@@ -180,8 +180,8 @@ def connlevel_sequence(metadata, mapping):
 
                     if a==b:
                         distm[a][b] = 0.0
-                    elif b>a:                                
-                        dist,path= fastdtw(i,j,dist=euclidean)
+                    else:                            
+                        dist,_= fastdtw(i,j,dist=euclidean)
                         distm[a][b] = dist
                         distm[b][a] = dist
 
@@ -255,9 +255,8 @@ def connlevel_sequence(metadata, mapping):
             distm = [[-1]*len(data.values()) for i in distm]
 
             for a in range(len(data.values())): #range(10):
-                #distm.append([])
 
-                for b in range(len(data.values())):
+                for b in range(a+1):
 
                     i = [x[0] for x in values[a]][:thresh]
                     j = [x[0] for x in values[b]][:thresh]
@@ -266,11 +265,11 @@ def connlevel_sequence(metadata, mapping):
 
                     if a==b:
                         distm[a][b] = 0.0
-                    elif b>a:                                
-                        dist,path= fastdtw(i,j,dist=euclidean)
+                    else:                                
+                        dist,_= fastdtw(i,j,dist=euclidean)
                         distm[a][b] = dist
                         distm[b][a] = dist
-                    #print 'len(A): '+ str(len(i)) + ' len(B): ' + str(len(j)) + ' dtw: ' + str(dist)
+
                     
 
         with open(filename, 'w') as outfile:
@@ -328,7 +327,7 @@ def connlevel_sequence(metadata, mapping):
 
             dat =  [x[3] for x in values[a]][:thresh]
 
-            #ngrams.append(zip(dat, dat[1:], dat[2:]))
+
             li = zip(dat, dat[1:], dat[2:])
             for b in li:
                 if b not in profile.keys():
@@ -340,7 +339,7 @@ def connlevel_sequence(metadata, mapping):
             ngrams.append(profile)
 
 
-        #print ngrams[0]
+
         profiles = []
         # update for arrays
 
@@ -349,19 +348,15 @@ def connlevel_sequence(metadata, mapping):
         for a in range(len(ngrams)):
             # distm.append([])
             #labels.append(mapping[keys[a]])
-            for b in range(len(ngrams)):
-
-                i = ngrams[a]
-                j = ngrams[b]
-                ngram_all = list(set(i.keys()) | set(j.keys()))
-                i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
-                j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
-            
-
+            for b in range(a+1):
                 if a==b:
                     distm[a][b] = 0.0
-                elif b>a:                                
-
+                else:                                
+                    i = ngrams[a]
+                    j = ngrams[b]
+                    ngram_all = list(set(i.keys()) | set(j.keys()))
+                    i_vec = [(i[item] if item in i.keys() else 0) for item in ngram_all]
+                    j_vec = [(j[item] if item in j.keys() else 0) for item in ngram_all]
                     dist = cosine(i_vec, j_vec)
                     distm[a][b] = dist
                     distm[b][a] = dist
@@ -439,10 +434,10 @@ def connlevel_sequence(metadata, mapping):
         
         assert len(ngrams) == len(values)
         for a in range(len(ngrams)):
-            for b in range(len(ngrams)):
+            for b in range(a+1):
                 if a==b:
                     distm[a][b] = 0.0
-                elif b>a:   
+                else:   
                     i = ngrams[a]
                     j = ngrams[b]
                     ngram_all = list(set(i.keys()) | set(j.keys()))
