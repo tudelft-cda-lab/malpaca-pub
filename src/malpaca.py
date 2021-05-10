@@ -9,9 +9,10 @@ import socket
 import sys
 import time
 import warnings
+import random
 from collections import deque, defaultdict
-from dataclasses import dataclass, fields
-from typing import TypeVar, Callable, Optional
+from dataclasses import fields
+from typing import TypeVar, Callable
 
 import dpkt
 import hdbscan
@@ -21,11 +22,16 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from fastdist import fastdist
+from fastdtw import fastdtw
 from sklearn.manifold import TSNE
 from tqdm import tqdm
 
+from models import PackageInfo, ConnectionKey
+from statisticalMeasurements import getStatisticalNormalizedDistanceMeasurement
+
 T = TypeVar('T')
 
+random.seed(42)
 plt.rcParams.update({'figure.max_open_warning': 0})
 warnings.filterwarnings("ignore", message="Attempting to set identical left == right")
 
@@ -43,49 +49,7 @@ outputDirRaw = outputDir + 'raw/'
 outputDirDist = outputDir + 'dist/'
 outputDirFigs = outputDir + 'figs' + addition
 
-
-@dataclass(frozen=True)
-class ConnectionKey:
-    __slots__ = ['filename', 'sourceIp', 'destinationIp', 'slice']
-    filename: str
-    sourceIp: str
-    destinationIp: str
-    slice: int
-
-    def name(self):
-        return f"{self.sourceIp}->{self.destinationIp}:{self.slice}"
-
-    def __getstate__(self):
-        return dict(
-            (slot, getattr(self, slot))
-            for slot in self.__slots__
-            if hasattr(self, slot)
-        )
-
-    def __setstate__(self, state):
-        for slot, value in state.items():
-            object.__setattr__(self, slot, value)
-
-
-@dataclass(frozen=True)
-class PackageInfo:
-    __slots__ = ['gap', 'bytes', 'sourcePort', 'destinationPort', 'connectionLabel']
-    gap: int
-    bytes: int
-    sourcePort: int
-    destinationPort: int
-    connectionLabel: Optional[str]
-
-    def __getstate__(self):
-        return dict(
-            (slot, getattr(self, slot))
-            for slot in self.__slots__
-            if hasattr(self, slot)
-        )
-
-    def __setstate__(self, state):
-        for slot, value in state.items():
-            object.__setattr__(self, slot, value)
+minClusterSize = 7
 
 
 # @profile
@@ -121,15 +85,6 @@ def getSequentialNormalizedDistanceMeasurement(values):
     ndmDestinationPort = normalizedDestinationPortDistance(values)
 
     return normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
-
-
-def getStatisticalNormalizedDistanceMeasurement(values):
-    ndmBytesAverage = normalizedStatisticalByteDistanceAverage(values)
-    ndmBytesMin = normalizedStatisticalByteDistanceMin(values)
-    ndmBytesMax = normalizedStatisticalByteDistanceMax(values)
-    ndmGaps = normalizedStatisticalGapsDistance(values)
-
-    return normalizedDistanceMeasurement(ndmGaps, ndmBytesAverage, ndmBytesMin, ndmBytesMax)
 
 
 def storeRawData(values):
@@ -245,9 +200,8 @@ def generateClusters(normalizeDistanceMeasurement):
     plt.scatter(*projection.T)
     plt.savefig(outputDir + "tsne-result" + addition)
     plt.close()
-    size = 7
-    sample = 7
-    model = hdbscan.HDBSCAN(min_cluster_size=size, min_samples=sample, cluster_selection_method='leaf',
+
+    model = hdbscan.HDBSCAN(min_cluster_size=minClusterSize, min_samples=minClusterSize, cluster_selection_method='leaf',
                             metric='precomputed')
     clu = model.fit(np.array([np.array(x) for x in normalizeDistanceMeasurement]))  # final for citadel and dridex
 
@@ -456,79 +410,57 @@ def normalizedDistanceMeasurement(*args):
 def normalizedByteDistance(values: list[list[PackageInfo]]):
     filename = 'bytesDist' + addition + '.txt'
 
-    bytesDistances = np.zeros((len(values), thresh))
+    lenth = len(values)
+    bytesDistances = np.zeros((lenth, thresh))
 
     for i, value in enumerate(values):
         bytesDistances[i] = [x.bytes for x in value]
 
-    distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
+    distm = np.zeros((lenth, lenth))
+
+    for i in tqdm(range(lenth)):
+        for j in range(i, lenth):
+            if i == j:
+                continue
+            distance = ownFastDtw(bytesDistances[i], bytesDistances[j])
+            distm[i][j] = distance
+            distm[j][i] = distance
+
+    # distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
     with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     return distm / distm.max()
+
+
+def ownFastDtw(u, v):
+    distance, path = fastdtw(u, v)
+    return distance
 
 
 def normalizedGapsDistance(values: list[list[PackageInfo]]):
     filename = 'gapsDist' + addition + '.txt'
 
-    gapsDistances = np.zeros((len(values), thresh))
+    lenth = len(values)
+
+    gapsDistances = np.zeros((lenth, thresh))
 
     for i, value in enumerate(values):
         gapsDistances[i] = [x.gap for x in value]
 
-    distm = fastdist.cosine_pairwise_distance(gapsDistances, return_matrix=True)
+    distm = np.zeros((lenth, lenth))
 
-    with open(outputDirDist + filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    for i in tqdm(range(lenth)):
+        for j in range(i, lenth):
+            if i == j:
+                continue
+            distance = ownFastDtw(gapsDistances[i], gapsDistances[j])
+            distm[i][j] = distance
+            distm[j][i] = distance
 
-    return distm / distm.max()
-
-
-def normalizedStatisticalByteDistanceAverage(values: list[list[PackageInfo]]):
-    bytesDistances = np.zeros((len(values), 1))
-
-    for i, value in enumerate(values):
-        bytesDistances[i] = np.average([x.bytes for x in value])
-
-    distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
-
-    return distm / distm.max()
-
-
-def normalizedStatisticalByteDistanceMin(values: list[list[PackageInfo]]):
-    bytesDistances = np.zeros((len(values), 1))
-
-    for i, value in enumerate(values):
-        bytesDistances[i] = np.min([x.bytes for x in value])
-
-    distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
-
-    return distm / distm.max()
-
-
-def normalizedStatisticalByteDistanceMax(values: list[list[PackageInfo]]):
-    bytesDistances = np.zeros((len(values), 1))
-
-    for i, value in enumerate(values):
-        bytesDistances[i] = np.max([x.bytes for x in value])
-
-    distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
-
-    return distm / distm.max()
-
-
-def normalizedStatisticalGapsDistance(values: list[list[PackageInfo]]):
-    filename = 'gapsStatsDist' + addition + '.txt'
-
-    gapsDistances = np.zeros((len(values), 1))
-
-    for i, value in enumerate(values):
-        gapsDistances[i] = np.mean([x.gap for x in value])
-
-    distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
+    # distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
     with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
@@ -558,7 +490,7 @@ def generateCosineDistanceFromNGramsAndSave(filename, ngrams):
 
     distm = np.zeros((dataValuesLength, dataValuesLength))
 
-    for a in range(dataValuesLength):
+    for a in tqdm(range(dataValuesLength)):
         for b in range(a, dataValuesLength):
             if a == b:
                 distm[a][b] = 0.0
@@ -717,9 +649,10 @@ def readPCAP(filename, labels, count=0) -> dict[tuple[str, str], list[PackageInf
     return {key: value for (key, value) in connections.items() if len(value) >= thresh}
 
 
-def readFolderWithPCAPs(maxConnections=1000, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(perLabelThreshold=200, useCache=False, useFileCache=True):
     meta = {}
     mapping = {}
+    selectedLabels = defaultdict(int)
     mappingIndex = 0
     files = glob.glob(sys.argv[2] + "/*.pcap")
     print('About to read pcap...')
@@ -748,20 +681,46 @@ def readFolderWithPCAPs(maxConnections=1000, useCache=False, useFileCache=True):
                 with open(cacheName, 'wb') as file:
                     pickle.dump(connections, file)
 
-            slidingWindow = maxConnections // len(connections)
-            print(f"Using slidingWindow {slidingWindow} for {len(connections)} connections")
+            # slidingWindow = maxConnections // len(connections)
+            # print(f"Using slidingWindow {slidingWindow} for {len(connections)} connections")
 
             for i, v in connections.items():
                 amountOfPackages = len(v)
-                for window in range(amountOfPackages // thresh):
-                    if window >= slidingWindow:
-                        break
+                windowRange = list(range(amountOfPackages // thresh))
+
+                if len(windowRange) < 11:
+                    continue
+
+                wantedWindow = windowRange[:1] + windowRange[-1:]
+                wantedWindow += random.sample(windowRange[2:-1], 8)
+
+                for window in wantedWindow:
                     key = ConnectionKey(cacheKey, i[0], i[1], window)
+                    selection = v[thresh * window:thresh * (window + 1)]
+                    labels = set()
+                    for package in selection:
+                        labels.add(package.connectionLabel)
+
+                    if len(labels) != 1:
+                        print("Got set with multiple labels", labels)
+                        continue
+
+                    label = labels.pop()
+
+                    if label == '-':
+                        if selectedLabels[label] >= 100:
+                            continue
+                    elif selectedLabels[label] >= perLabelThreshold:
+                        continue
+
+                    selectedLabels[label] += 1
                     mapping[key] = mappingIndex
                     mappingIndex += 1
-                    meta[key] = v[thresh * window:thresh * (window + 1)]
+                    meta[key] = selection
 
             connectionSummary(connections)
+            selectedLabels['-'] = 0
+            print(selectedLabels)
 
         with open('data/meta.pkl', 'wb') as file:
             pickle.dump(meta, file)
