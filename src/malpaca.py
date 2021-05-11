@@ -21,12 +21,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from fastdist import fastdist
+from numba.typed import Dict, List
+from numba.core import types
 from sklearn.manifold import TSNE
 from tqdm import tqdm
 
 from models import PackageInfo, ConnectionKey
-from fast_dtw import dtw_distance
+from fast_dtw import dtw_distance, ngram_distance
 from statisticalMeasurements import getStatisticalNormalizedDistanceMeasurement
 
 T = TypeVar('T')
@@ -49,7 +50,7 @@ outputDirRaw = outputDir + 'raw/'
 outputDirDist = outputDir + 'dist/'
 outputDirFigs = outputDir + 'figs' + addition
 
-minClusterSize = 15
+minClusterSize = 20
 
 
 # @profile
@@ -204,13 +205,13 @@ def generateClusters(normalizeDistanceMeasurement):
                             metric='precomputed')
     clu = model.fit(np.array([np.array(x) for x in normalizeDistanceMeasurement]))  # final for citadel and dridex
 
-    print("num clusters: " + str(len(set(clu.labels_)) - 1))
+    print(f"num clusters: {len(set(clu.labels_)) - 1}")
     avg = 0.0
     for line in list(set(clu.labels_)):
         if line != -1:
             avg += sum([(1 if x == line else 0) for x in clu.labels_])
-    print("average size of cluster:" + str(float(avg) / float(len(set(clu.labels_)) - 1)))
-    print("samples in noise: " + str(sum([(1 if x == -1 else 0) for x in clu.labels_])))
+    print(f"average size of cluster: {float(avg) / float(len(set(clu.labels_)) - 1)}")
+    print(f"samples in noise: {sum([(1 if x == -1 else 0) for x in clu.labels_])}")
 
     return clu, projection
 
@@ -417,16 +418,6 @@ def normalizedByteDistance(values: list[list[PackageInfo]]):
 
     distm = dtw_distance(bytesDistances)
 
-    # for i in tqdm(range(lenth)):
-    #     for j in range(i, lenth):
-    #         if i == j:
-    #             continue
-    #         distance = _dtw_distance(bytesDistances[i], bytesDistances[j])
-    #         distm[i][j] = distance
-    #         distm[j][i] = distance
-
-    # distm = fastdist.matrix_pairwise_distance(bytesDistances, fastdist.euclidean, "euclidean", return_matrix=True)
-
     with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
             outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
@@ -445,18 +436,6 @@ def normalizedGapsDistance(values: list[list[PackageInfo]]):
         gapsDistances[i] = [x.gap for x in value]
 
     distm = dtw_distance(gapsDistances)
-
-    # distm = np.zeros((lenth, lenth))
-    #
-    # for i in tqdm(range(lenth)):
-    #     for j in range(i, lenth):
-    #         if i == j:
-    #             continue
-    #         distance = _dtw_distance(gapsDistances[i], gapsDistances[j])
-    #         distm[i][j] = distance
-    #         distm[j][i] = distance
-
-    # distm = fastdist.matrix_pairwise_distance(gapsDistances, fastdist.euclidean, "euclidean", return_matrix=True)
 
     with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
@@ -482,26 +461,7 @@ def normalizedDestinationPortDistance(values: list[list[PackageInfo]]):
 
 
 def generateCosineDistanceFromNGramsAndSave(filename, ngrams):
-    dataValuesLength = len(ngrams)
-
-    distm = np.zeros((dataValuesLength, dataValuesLength))
-
-    for a in tqdm(range(dataValuesLength)):
-        for b in range(a, dataValuesLength):
-            if a == b:
-                continue
-
-            i = ngrams[a]
-            j = ngrams[b]
-
-            ngram_all = list(set(i.keys()) | set(j.keys()))
-            i_vec = np.array([(i[item] if item in i.keys() else 0) for item in ngram_all])
-            j_vec = np.array([(j[item] if item in j.keys() else 0) for item in ngram_all])
-
-            dist = 1 - fastdist.cosine(i_vec, j_vec)
-
-            distm[a][b] = dist
-            distm[b][a] = dist
+    distm = ngram_distance(ngrams)
 
     with open(outputDirDist + filename, 'w') as outfile:
         for a in range(len(distm)):
@@ -511,15 +471,21 @@ def generateCosineDistanceFromNGramsAndSave(filename, ngrams):
 
 
 def generateNGrams(attribute, values: list[list[PackageInfo]]):
-    ngrams = []
+    ngrams = List()
     for value in values:
-        profile = defaultdict(int)
+        profile = Dict.empty(types.int64, types.int64)
 
         dat = [getattr(x, attribute) for x in value]
 
         li = zip(dat, dat[1:], dat[2:])
+
         for b in li:
-            profile[b] += 1
+            key = hash(b)
+            if key not in profile:
+                profile[key] = 0
+
+            profile[key] += 1
+
         ngrams.append(profile)
     return ngrams
 
@@ -571,8 +537,9 @@ def readLabeled(filename) -> (dict[int, str], int):
     return connectionLabels, line_count
 
 
-def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
+def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
     preProcessed = defaultdict(list)
+    reachedSizeLimit = []
 
     with open(filename, 'rb') as f:
         pcap = dpkt.pcap.Reader(f)
@@ -589,10 +556,13 @@ def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
 
             key = hash((level3.src, level3.dst))
 
-            # if len(preProcessed[key]) > 5000:
-            #     continue
+            if key in reachedSizeLimit:
+                continue
 
             preProcessed[key].append((ts, pkt))
+
+            if len(preProcessed[key]) > cutOff:
+                reachedSizeLimit.append(key)
 
     print(f'Before cleanup: {len(preProcessed)} connections.')
 
@@ -641,22 +611,25 @@ def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
         else:
             continue
 
-        label = labels.get(hash((src_ip, dst_ip, source_port, destination_port))) or labels.get(hash((dst_ip, src_ip, destination_port, source_port)))
+        label = labels.get(hash((src_ip, dst_ip, source_port, destination_port))) or labels.get(hash((dst_ip, src_ip, destination_port, source_port))) or '-'
 
-        flow_data = PackageInfo(gap, level3.len, source_port, destination_port, label or '-')
+        flow_data = PackageInfo(gap, level3.len, source_port, destination_port, label)
 
         connections[key].append(flow_data)
 
     return {key: value for (key, value) in connections.items() if len(value) >= thresh}
 
 
-def readFolderWithPCAPs(perLabelThreshold=200, useCache=True, useFileCache=True):
+def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=True):
     meta = {}
     mapping = {}
-    selectedLabels = defaultdict(int)
+    totalLabels = defaultdict(int)
     mappingIndex = 0
-    files = glob.glob(sys.argv[2] + "/**/*.pcap")
-    print('About to read pcap...')
+    if forceFileCacheUse:
+        files = glob.glob(sys.argv[2] + "/*.pcap.pkl")
+    else:
+        files = glob.glob(sys.argv[2] + "/**/*.pcap")
+    print(f'About to read pcap... from {len(files)} files')
 
     if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and useCache:
         with open('data/meta.pkl', 'rb') as file:
@@ -671,12 +644,11 @@ def readFolderWithPCAPs(perLabelThreshold=200, useCache=True, useFileCache=True)
                 print(f'Using cache: {cacheKey}')
                 with open(cacheName, 'rb') as file:
                     connections = pickle.load(file)
-            else:
-                size = os.path.getsize(f) / 1024 / 1024 / 1024
-                if size > 0.5:
-                    print(f'skipping {f} because size is {size}gb')
-                    continue
-
+            elif os.path.exists(f) and forceFileCacheUse:
+                print(f'Using cache: {cacheKey}')
+                with open(f, 'rb') as file:
+                    connections = pickle.load(file)
+            elif not forceFileCacheUse:
                 print(f'Reading file: {cacheKey}')
                 connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f))
 
@@ -685,9 +657,13 @@ def readFolderWithPCAPs(perLabelThreshold=200, useCache=True, useFileCache=True)
 
                 with open(cacheName, 'wb') as file:
                     pickle.dump(connections, file)
+            else:
+                print(f'Skipping {f} because it has no cache file: {cacheName}')
+                continue
 
             connectionItems: list[(ConnectionKey, list[PackageInfo])] = list(connections.items())
             random.shuffle(connectionItems)
+            selectedLabelsPerFile = defaultdict(int)
 
             for i, v in connectionItems:
                 wantedWindow = getWantedWindow(v)
@@ -704,32 +680,29 @@ def readFolderWithPCAPs(perLabelThreshold=200, useCache=True, useFileCache=True)
 
                     label = labels.pop()
 
-                    if label == '-':
-                        if selectedLabels[label] >= 100:
-                            continue
-                    elif selectedLabels[label] >= perLabelThreshold:
+                    if selectedLabelsPerFile[label] >= 200:
                         continue
 
-                    selectedLabels[label] += 1
+                    selectedLabelsPerFile[label] += 1
                     mapping[key] = mappingIndex
                     mappingIndex += 1
                     meta[key] = selection
 
-            connectionSummary(connections)
-            selectedLabels['-'] = 0
-            print(selectedLabels.items())
+            # connectionSummary(connections, selectedLabelsPerFile)
+            for k, v in selectedLabelsPerFile.items():
+                totalLabels[k] += v
 
         with open('data/meta.pkl', 'wb') as file:
             pickle.dump(meta, file)
         with open('data/mapping.pkl', 'wb') as file:
             pickle.dump(mapping, file)
 
-    print('Done reading pcaps...')
-    print('Collective surviving connections ', len(meta))
+    print(f'Collective surviving connections {len(meta)}')
+    connectionSummary(meta, totalLabels)
 
     if len(meta) < 50:
         print('Too little connections to create clustering')
-        raise ValueError
+        raise Exception
 
     return meta, mapping
 
@@ -758,12 +731,13 @@ def timeFunction(name, fun: Callable[[], T]) -> T:
     return value
 
 
-def connectionSummary(connections):
+def connectionSummary(connections, selectedLabelsPerFile):
     connectionLengths = [len(x) for i, x in connections.items()]
     print("Different connections: ", len(connections))
     print("Average conn length: ", np.mean(connectionLengths))
     print("Minimum conn length: ", np.min(connectionLengths))
     print("Maximum conn length: ", np.max(connectionLengths))
+    print(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'benign: {x[1]}', selectedLabelsPerFile.items())))
     print('----------------')
 
 
