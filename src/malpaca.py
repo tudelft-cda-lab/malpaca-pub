@@ -49,7 +49,7 @@ outputDirRaw = outputDir + 'raw/'
 outputDirDist = outputDir + 'dist/'
 outputDirFigs = outputDir + 'figs' + addition
 
-minClusterSize = 7
+minClusterSize = 15
 
 
 # @profile
@@ -161,12 +161,11 @@ def labelSummary(packages: list[PackageInfo]):
     summary = {'labels': set(), 'total': len(packages), 'malicious': 0, 'benign': 0}
 
     for package in packages:
-        if package.connectionLabel:
-            if package.connectionLabel != '-':
-                summary['malicious'] += 1
-                summary['labels'].add(package.connectionLabel)
-            else:
-                summary['benign'] += 1
+        if package.connectionLabel != '-':
+            summary['malicious'] += 1
+            summary['labels'].add(package.connectionLabel)
+        else:
+            summary['benign'] += 1
 
     summary.update({'percentage': summary['malicious'] / summary['total'] * 100})
 
@@ -541,7 +540,7 @@ def readLabeled(filename) -> (dict[int, str], int):
     labelsFilename = filename.replace("pcap", "labeled")
     if not os.path.exists(labelsFilename):
         print(f"Label file for {filename} doesn't exist")
-        return {}
+        return {}, 0
 
     connectionLabels = {}
 
@@ -572,12 +571,12 @@ def readLabeled(filename) -> (dict[int, str], int):
     return connectionLabels, line_count
 
 
-def readPCAP(filename, labels, count=0) -> dict[tuple[str, str], list[PackageInfo]]:
+def readPCAP(filename) -> dict[tuple[str, str], list[PackageInfo]]:
     preProcessed = defaultdict(list)
 
     with open(filename, 'rb') as f:
         pcap = dpkt.pcap.Reader(f)
-        for ts, pkt in tqdm(pcap, total=count, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
+        for ts, pkt in tqdm(pcap, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
             try:
                 eth = dpkt.ethernet.Ethernet(pkt)
             except:
@@ -589,6 +588,9 @@ def readPCAP(filename, labels, count=0) -> dict[tuple[str, str], list[PackageInf
                 continue
 
             key = hash((level3.src, level3.dst))
+
+            # if len(preProcessed[key]) > 5000:
+            #     continue
 
             preProcessed[key].append((ts, pkt))
 
@@ -606,6 +608,8 @@ def readPCAP(filename, labels, count=0) -> dict[tuple[str, str], list[PackageInf
     connections = defaultdict(list)
     previousTimestamp = {}
     count = 0
+
+    labels, lineCount = timeFunction(readLabeled.__name__, lambda: readLabeled(filename))
 
     for ts, pkt in tqdm(flattened, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
         eth = dpkt.ethernet.Ethernet(pkt)
@@ -639,19 +643,19 @@ def readPCAP(filename, labels, count=0) -> dict[tuple[str, str], list[PackageInf
 
         label = labels.get(hash((src_ip, dst_ip, source_port, destination_port))) or labels.get(hash((dst_ip, src_ip, destination_port, source_port)))
 
-        flow_data = PackageInfo(gap, level3.len, source_port, destination_port, label)
+        flow_data = PackageInfo(gap, level3.len, source_port, destination_port, label or '-')
 
         connections[key].append(flow_data)
 
     return {key: value for (key, value) in connections.items() if len(value) >= thresh}
 
 
-def readFolderWithPCAPs(perLabelThreshold=2000, useCache=False, useFileCache=True):
+def readFolderWithPCAPs(perLabelThreshold=200, useCache=True, useFileCache=True):
     meta = {}
     mapping = {}
     selectedLabels = defaultdict(int)
     mappingIndex = 0
-    files = glob.glob(sys.argv[2] + "/*.pcap")
+    files = glob.glob(sys.argv[2] + "/**/*.pcap")
     print('About to read pcap...')
 
     if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and useCache:
@@ -668,9 +672,13 @@ def readFolderWithPCAPs(perLabelThreshold=2000, useCache=False, useFileCache=Tru
                 with open(cacheName, 'rb') as file:
                     connections = pickle.load(file)
             else:
+                size = os.path.getsize(f) / 1024 / 1024 / 1024
+                if size > 0.5:
+                    print(f'skipping {f} because size is {size}gb')
+                    continue
+
                 print(f'Reading file: {cacheKey}')
-                labels, lineCount = timeFunction(readLabeled.__name__, lambda: readLabeled(f))
-                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f, labels, lineCount))
+                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f))
 
                 if len(connections.items()) < 1:
                     continue
@@ -678,18 +686,11 @@ def readFolderWithPCAPs(perLabelThreshold=2000, useCache=False, useFileCache=Tru
                 with open(cacheName, 'wb') as file:
                     pickle.dump(connections, file)
 
-            # slidingWindow = maxConnections // len(connections)
-            # print(f"Using slidingWindow {slidingWindow} for {len(connections)} connections")
+            connectionItems: list[(ConnectionKey, list[PackageInfo])] = list(connections.items())
+            random.shuffle(connectionItems)
 
-            for i, v in connections.items():
-                amountOfPackages = len(v)
-                windowRange = list(range(amountOfPackages // thresh))
-
-                if len(windowRange) < 11:
-                    continue
-
-                wantedWindow = windowRange[:1] + windowRange[-1:]
-                wantedWindow += random.sample(windowRange[2:-1], 8)
+            for i, v in connectionItems:
+                wantedWindow = getWantedWindow(v)
 
                 for window in wantedWindow:
                     key = ConnectionKey(cacheKey, i[0], i[1], window)
@@ -699,7 +700,6 @@ def readFolderWithPCAPs(perLabelThreshold=2000, useCache=False, useFileCache=Tru
                         labels.add(package.connectionLabel)
 
                     if len(labels) != 1:
-                        # print("Got set with multiple labels", labels)
                         continue
 
                     label = labels.pop()
@@ -717,7 +717,7 @@ def readFolderWithPCAPs(perLabelThreshold=2000, useCache=False, useFileCache=Tru
 
             connectionSummary(connections)
             selectedLabels['-'] = 0
-            print(selectedLabels)
+            print(selectedLabels.items())
 
         with open('data/meta.pkl', 'wb') as file:
             pickle.dump(meta, file)
@@ -734,6 +734,21 @@ def readFolderWithPCAPs(perLabelThreshold=2000, useCache=False, useFileCache=Tru
     return meta, mapping
 
 
+def getWantedWindow(v):
+    amountOfPackages = len(v)
+    windowRange = list(range(amountOfPackages // thresh))
+    possibleWindows = len(windowRange)
+
+    if possibleWindows == 1:
+        return [0]
+    elif possibleWindows == 2:
+        return [0, 1]
+    else:
+        wantedWindow = windowRange[:1] + windowRange[-1:]
+        wantedWindow += random.sample(windowRange[1:-1], min(len(windowRange) - 2, 8))
+        return wantedWindow
+
+
 def timeFunction(name, fun: Callable[[], T]) -> T:
     print(f"Started {name}...")
     startTime = time.perf_counter()
@@ -745,6 +760,7 @@ def timeFunction(name, fun: Callable[[], T]) -> T:
 
 def connectionSummary(connections):
     connectionLengths = [len(x) for i, x in connections.items()]
+    print("Different connections: ", len(connections))
     print("Average conn length: ", np.mean(connectionLengths))
     print("Minimum conn length: ", np.min(connectionLengths))
     print("Maximum conn length: ", np.max(connectionLengths))

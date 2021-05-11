@@ -32,7 +32,7 @@ class PackageInfo:
     bytes: int
     sourcePort: int
     destinationPort: int
-    connectionLabel: Optional[str]
+    connectionLabel: str
 
     def __getstate__(self):
         return dict(
