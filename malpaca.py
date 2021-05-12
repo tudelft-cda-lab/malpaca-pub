@@ -43,6 +43,7 @@ if len(sys.argv) > 3:
 thresh = 20 
 if len(sys.argv) > 4:
     thresh = int(sys.argv[4])
+win = 2
 
 RPY2 = False
 if len(sys.argv) > 5:
@@ -193,7 +194,7 @@ def connlevel_sequence(metadata, mapping):
         with open('mapping'+addition+'.txt', 'w') as outfile:
            outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
     endb = time.time()
-    print('bytes ', (endb-startb))
+    print('+++++++ TIME: bytes ', (endb-startb))
     ndistmB = []
     mini = min(min(distm))
     maxi = max(max(distm))
@@ -278,7 +279,7 @@ def connlevel_sequence(metadata, mapping):
                 outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     endg = time.time()
-    print('gaps ', (endg-startg))
+    print('+++++++ TIME: gaps ', (endg-startg))
     ndistmG = []
     mini = min(min(distm))
     maxi = max(max(distm))
@@ -369,7 +370,7 @@ def connlevel_sequence(metadata, mapping):
                 outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     ends = time.time()
-    print('sport ', (ends-starts))
+    print('+++++++ TIME: sport ', (ends-starts))
 
     #mini = min(min(distm))
     #maxi = max(max(distm))
@@ -455,7 +456,7 @@ def connlevel_sequence(metadata, mapping):
         
 
     endd = time.time()
-    print('time dport ', (endd-startd))
+    print('+++++++ TIME: dport ', (endd-startd))
     mini = min(min(distm))
     maxi = max(max(distm))
     #print mini
@@ -496,8 +497,8 @@ def connlevel_sequence(metadata, mapping):
 
 
 
-    size = 7
-    sample= 7
+    size = 20
+    sample= 15
 
     model = hdbscan.HDBSCAN(min_cluster_size = size,  min_samples = sample, cluster_selection_method='leaf', metric='precomputed')
     clu = model.fit(np.array([np.array(x) for x in ndistm])) # final for citadel and dridex
@@ -882,6 +883,7 @@ def readpcap(filename):
     tcpcounter=0
     udpcounter=0
 
+    windows = 2
     data = []
     connections = {}
     packetspersecond=[]
@@ -889,7 +891,7 @@ def readpcap(filename):
     count = 0
     previousTimestamp = {}
     bytespersec = 0
-    gaps = []
+    stats = []
     incoming = []
     outgoing = []
     period = 0
@@ -918,15 +920,15 @@ def readpcap(filename):
                 timestamp = datetime.datetime.utcfromtimestamp(ts)
 
                 if key in previousTimestamp:
-                    gap = (timestamp - previousTimestamp[key]).microseconds / 1000
+                    gap = (timestamp - previousTimestamp[key]).microseconds / 1000 # milliseconds
                 else:
                     gap = 0
 
                 previousTimestamp[key] = timestamp
 
-                tupple = (gap, ip.len, ip.p)
+                
 
-                gaps.append(tupple)
+                stats.append(0)
 
                 sport = 0
                 dport = 0
@@ -948,12 +950,13 @@ def readpcap(filename):
     
     values = []
     todel = []
-    print('Before cleanup: Total packets: ', len(gaps), ' in ', len(connections), ' connections.' )
+    print('Before cleanup: Total packets: ', len(stats), ' in ', len(connections), ' connections.' )
+    print("Average conn length (before): ", np.mean([len(x) for i,x in connections.items()]))
+    print("Minimum conn length (before): ", np.min([len(x) for i,x in connections.items()]))
+    print("Maximum conn length (before): ", np.max([len(x) for i,x in connections.items()]))
     for i,v in connections.items(): # clean it up
         if len(v) < thresh:
-           
             todel.append(i)
-            
     
     for item in todel:
         del connections[item]
@@ -961,7 +964,25 @@ def readpcap(filename):
     
     print("Remaining connections after clean up ", len(connections))
     
-    return (gaps,connections)
+    ## Breaking longer connections into multiple windows
+    windowed = dict()
+    for key,val in connections.items():
+        i = 0
+        start = i*thresh
+        end = start + thresh
+        while True:
+	        if len(val) <= end or i == win:
+		        break
+	        part = val[start:end]
+	        k = (key[0],key[1],i)
+	        windowed[k] = part
+
+	        start = end
+	        end = start+thresh
+	        i+=1 
+    print("After splitting in windows, # connections ", len(windowed))
+        
+    return (windowed)
 
 
 def readfolder():
@@ -973,12 +994,12 @@ def readfolder():
     for f in files:
         key = os.path.basename(f)#[:-5].split('-')
    
-        data,connections = (readpcap(f))
+        connections = (readpcap(f))
         if len(connections.items()) < 1:
             continue
 
         for i,v in connections.items():
-            name = key+ i[0] + "->" + i[1]
+            name = key+ i[0] + "->" + i[1] + '-' + str(i[2])
             print (name)
             #name = meta[key[len(key)-1]]['threat']+"|" +key[len(key)-1][:5]+"|"+i[0]+"->"+i[1]
             mapping[name] = fno
@@ -1000,14 +1021,14 @@ def readfile():
     startf = time.time()
     mapping= {}
     print('About to read pcap...')
-    data, connections = readpcap(sys.argv[2])
+    connections = readpcap(sys.argv[2])
     print('Done reading pcaps...')
     if len(connections.items()) < 1:
         return
 
 
     endf = time.time()
-    print('file reading ', (endf-startf))
+    print('+++++++ TIME: file reading ', (endf-startf))
     fno = 0
     meta = {}
     nconnections = {}
@@ -1017,21 +1038,15 @@ def readfile():
     #print("num connections survived ", len(connections))
     #print(sum([1 for i,x in connections.items() if len(x)>=50]))
     for i, v in connections.items():
-        name = i[0] + "->" + i[1]
+        name = i[0] + "->" + i[1] + '-' + str(i[2])
         mapping[name] = fno
         fno += 1
         meta[name] = v
-
-        '''fig = plt.figure()
-        plt.title(''+name)
-        plt.plot([x[0] for x in v], 'r')
-        plt.plot([x[0] for x in v], 'r.')
-        plt.savefig('figs/'+str(mapping[name])+'.png')'''
     print('Surviving connections ', len(meta))
     startc = time.time()
     connlevel_sequence(meta, mapping)
     endc = time.time()
-    print('Total time ', (endc-startc))
+    print('+++++++ TIME: Total ', (endc-startc))
 
 if sys.argv[1] == 'file':
     readfile()
