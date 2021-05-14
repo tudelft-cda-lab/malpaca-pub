@@ -3,14 +3,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class ConnectionKey:
-    __slots__ = ['filename', 'sourceIp', 'destinationIp', 'slice']
+    __slots__ = ['filename', 'sourceIp', 'destinationIp', 'slice', 'connectionLabel']
     filename: str
     sourceIp: str
     destinationIp: str
     slice: int
+    connectionLabel: str
 
     def name(self):
-        return f"{self.sourceIp}->{self.destinationIp}:{self.slice}"
+        label = 'Benign' if self.connectionLabel == '-' else self.connectionLabel
+        return f"{self.sourceIp}->{self.destinationIp}:{self.slice}-{label}"
 
     def __getstate__(self):
         return dict(

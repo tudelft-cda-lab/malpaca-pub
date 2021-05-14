@@ -54,7 +54,7 @@ minClusterSize = 20
 
 
 # @profile
-def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=False):
+def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=True):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
     values = list(metadata.values())
@@ -71,7 +71,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     finalClusters, dagClusters, heatmapCluster = saveClustersToCsv(clu, mapping, inv_mapping)
 
-    finalClusterSummary(finalClusters, values)
+    finalClusterSummary(finalClusters, inv_mapping)
 
     if generateGraph:
         clusterAmount = len(finalClusters)
@@ -143,14 +143,14 @@ def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
     return final_clusters, dagClusters, heatmapClusters
 
 
-def finalClusterSummary(finalClusters, values):
+def finalClusterSummary(finalClusters, inv_mapping):
     for n, cluster in finalClusters.items():
-        packages = []
+        connectionKeys = []
 
         for connectionNumber in cluster:
-            packages += values[connectionNumber]
+            connectionKeys.append(inv_mapping[connectionNumber])
 
-        summary = labelSummary(packages)
+        summary = labelSummary(connectionKeys)
         percentage = summary['percentage']
         if percentage > 0:
             print(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
@@ -158,13 +158,13 @@ def finalClusterSummary(finalClusters, values):
             print(f"cluster {n} does not contain any malicious packages, connections: {len(cluster)}")
 
 
-def labelSummary(packages: list[PackageInfo]):
-    summary = {'labels': set(), 'total': len(packages), 'malicious': 0, 'benign': 0}
+def labelSummary(connectionKeys: list[ConnectionKey]):
+    summary = {'labels': set(), 'total': len(connectionKeys), 'malicious': 0, 'benign': 0}
 
-    for package in packages:
-        if package.connectionLabel != '-':
+    for key in connectionKeys:
+        if key.connectionLabel != '-':
             summary['malicious'] += 1
-            summary['labels'].add(package.connectionLabel)
+            summary['labels'].add(key.connectionLabel)
         else:
             summary['benign'] += 1
 
@@ -219,59 +219,49 @@ def generateClusters(normalizeDistanceMeasurement):
 def generateGraphs(clusterInfo, values: list[list[PackageInfo]]):
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
-    actualLabels = list(range(len(values)))
     with tqdm(total=(4 * len(clusterInfo)), unit='graphs') as t:
         for name, propertyName in [("Packet sizes", "bytes"), ("Interval", "gap"), ("Source Port", "sourcePort"), ("Dest. Port", "destinationPort")]:
             for clusterNumber, cluster in clusterInfo.items():
                 t.set_description_str(f"Working on {name}, cluster #{clusterNumber}")
-                generateTheGraph(clusterNumber, cluster, actualLabels, values, name, propertyName)
+                generateTheGraph(clusterNumber, cluster, values, name, propertyName)
                 t.update(1)
 
 
-def generateTheGraph(clusterNumber, cluster, actlabels, values: list[list[PackageInfo]], name, propertyName):
-    labels = [x[1] for x in cluster]
+def generateTheGraph(clusterNumber, cluster, values: list[list[PackageInfo]], name, propertyName):
+    labels = []
+    clusterMapData = []
 
-    acha = [actlabels.index(int(x[0])) for x in cluster]
+    for cluster in cluster:
+        labels.append(cluster[1])
+        connection = values[cluster[0]]
+        if propertyName == 'gap':
+            clusterMapData.append([package.__getattribute__(propertyName) / 1000 for package in connection])
+        else:
+            clusterMapData.append([package.__getattribute__(propertyName) for package in connection])
 
-    blah = [values[a] for a in acha]
+    clusterMapDf = pd.DataFrame(clusterMapData, index=labels)
+    clusterMap = sns.clustermap(clusterMapDf, xticklabels=False, col_cluster=False)
 
-    dataf = []
+    labelsReordered = []
+    heatmapData = []
 
-    for b in blah:
-        dataf.append([x.__getattribute__(propertyName) for x in b])
+    for it in clusterMap.dendrogram_row.reordered_ind:
+        labelsReordered.append(labels[it])
+        heatmapData.append(clusterMapData[it])
 
-    df = pd.DataFrame(dataf, index=labels)
-
-    g = sns.clustermap(df, xticklabels=False, col_cluster=False)
-
-    if df.shape[0] <= 50:
-        plt.figure(figsize=(10.0, 9.0))
-    elif df.shape[0] <= 100:
+    if len(cluster) <= 50:
+        plt.figure(figsize=(15.0, 9.0))
+    elif len(cluster) <= 100:
         plt.figure(figsize=(15.0, 18.0))
     else:
         plt.figure(figsize=(20.0, 27.0))
 
     plt.suptitle(f"Exp: {expname} | Cluster: {clusterNumber} | Feature: {name}")
 
-    labelsnew = []
-    lol = []
-    for it in g.dendrogram_row.reordered_ind:
-        labelsnew.append(labels[it])
+    heatmapDf = pd.DataFrame(heatmapData, index=labelsReordered)
+    heatmap = sns.heatmap(heatmapDf, xticklabels=False)
 
-        lol.append(cluster[[x[1] for x in cluster].index(labels[it])][0])
-
-    acha = [actlabels.index(int(x)) for x in lol]
-
-    blah = [values[a] for a in acha]
-
-    dataf = []
-
-    for b in blah:
-        dataf.append([x.__getattribute__(propertyName) for x in b][:20])
-
-    df = pd.DataFrame(dataf, index=labelsnew)
-    g = sns.heatmap(df, xticklabels=False)
-    plt.setp(g.get_yticklabels(), rotation=0)
+    plt.setp(heatmap.get_yticklabels(), rotation=0)
     plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
     plt.savefig(outputDirFigs + "/" + propertyName + "/" + str(clusterNumber))
     plt.clf()
@@ -620,7 +610,7 @@ def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
     return {key: value for (key, value) in connections.items() if len(value) >= thresh}
 
 
-def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=True):
+def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True):
     meta = {}
     mapping = {}
     totalLabels = defaultdict(int)
@@ -669,8 +659,7 @@ def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=Tru
                 wantedWindow = getWantedWindow(v)
 
                 for window in wantedWindow:
-                    key = ConnectionKey(cacheKey, i[0], i[1], window)
-                    selection = v[thresh * window:thresh * (window + 1)]
+                    selection: list[PackageInfo] = v[thresh * window:thresh * (window + 1)]
                     labels = set()
                     for package in selection:
                         labels.add(package.connectionLabel)
@@ -682,6 +671,8 @@ def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=Tru
 
                     if selectedLabelsPerFile[label] >= 200:
                         continue
+
+                    key = ConnectionKey(cacheKey, i[0], i[1], window, selection[0].connectionLabel)
 
                     selectedLabelsPerFile[label] += 1
                     mapping[key] = mappingIndex
