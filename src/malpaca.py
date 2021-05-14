@@ -54,7 +54,7 @@ minClusterSize = 20
 
 
 # @profile
-def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=True):
+def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=False):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
     values = list(metadata.values())
@@ -74,8 +74,8 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
     finalClusterSummary(finalClusters, inv_mapping)
 
     if generateGraph:
-        clusterAmount = len(finalClusters)
-        generateDag(dagClusters, clusterAmount)
+        # clusterAmount = len(finalClusters)
+        # generateDag(dagClusters, clusterAmount)
         timeFunction(generateGraphs.__name__, lambda: generateGraphs(heatmapCluster, values))
 
 
@@ -143,7 +143,7 @@ def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
     return final_clusters, dagClusters, heatmapClusters
 
 
-def finalClusterSummary(finalClusters, inv_mapping):
+def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey]):
     for n, cluster in finalClusters.items():
         connectionKeys = []
 
