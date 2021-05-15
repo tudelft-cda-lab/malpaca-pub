@@ -13,6 +13,7 @@ import random
 from collections import deque, defaultdict
 from dataclasses import fields
 from typing import TypeVar, Callable
+import logging
 
 import dpkt
 import hdbscan
@@ -21,40 +22,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from numba.typed import Dict, List
-from numba.core import types
 from sklearn.manifold import TSNE
 from tqdm import tqdm
 
+import config
 from models import PackageInfo, ConnectionKey
-from fast_dtw import dtw_distance, ngram_distance
+from sequentialMeasurements import getSequentialNormalizedDistanceMeasurement
 from statisticalMeasurements import getStatisticalNormalizedDistanceMeasurement
 
 T = TypeVar('T')
 
 random.seed(42)
+
+numba_logger = logging.getLogger('numba')
+matplotlib_logger = logging.getLogger('matplotlib')
+numba_logger.setLevel(logging.WARNING)
+matplotlib_logger.setLevel(logging.WARNING)
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
 plt.rcParams.update({'figure.max_open_warning': 0})
 warnings.filterwarnings("ignore", message="Attempting to set identical left == right")
 
-expname = 'exp'
-if len(sys.argv) > 3:
-    expname = sys.argv[3]
 
-thresh = 20
-if len(sys.argv) > 4:
-    thresh = int(sys.argv[4])
-
-addition = '-' + expname + '-' + str(thresh)
-outputDir = 'output/'  # All files in this folder will be deleted
-outputDirRaw = outputDir + 'raw/'
-outputDirDist = outputDir + 'dist/'
-outputDirFigs = outputDir + 'figs' + addition
-
-minClusterSize = 20
-
-
-# @profile
-def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=False):
+def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=True):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
     values = list(metadata.values())
@@ -63,7 +53,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     storeRawData(values)
 
-    normalizeDistanceMeasurement = timeFunction(getSequentialNormalizedDistanceMeasurement.__name__, lambda: getSequentialNormalizedDistanceMeasurement(values))
+    normalizeDistanceMeasurement = timeFunction(getStatisticalNormalizedDistanceMeasurement.__name__, lambda: getStatisticalNormalizedDistanceMeasurement(values))
 
     clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
 
@@ -79,19 +69,10 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
         timeFunction(generateGraphs.__name__, lambda: generateGraphs(heatmapCluster, values))
 
 
-def getSequentialNormalizedDistanceMeasurement(values):
-    ndmBytes = normalizedByteDistance(values)
-    ndmGaps = normalizedGapsDistance(values)
-    ndmSourcePort = normalizedSourcePortDistance(values)
-    ndmDestinationPort = normalizedDestinationPortDistance(values)
-
-    return normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
-
-
 def storeRawData(values):
     for field in fields(PackageInfo):
         feat = field.name
-        with open(outputDirRaw + feat + '-features' + addition, 'w') as f:
+        with open(config.outputDirRaw + feat + '-features' + config.addition, 'w') as f:
             for val in values:
                 vi = [str(x.__getattribute__(feat)) for x in val]
                 f.write(','.join(vi))
@@ -99,20 +80,20 @@ def storeRawData(values):
 
 
 def generateOutputFolders():
-    if os.path.exists(outputDir):
-        shutil.rmtree(outputDir)
-    os.mkdir(outputDir)
-    os.mkdir(outputDirRaw)
-    os.mkdir(outputDirDist)
-    os.mkdir(outputDirFigs)
-    os.mkdir(outputDirFigs + '/bytes')
-    os.mkdir(outputDirFigs + '/gap')
-    os.mkdir(outputDirFigs + '/sourcePort')
-    os.mkdir(outputDirFigs + '/destinationPort')
+    if os.path.exists(config.outputDir):
+        shutil.rmtree(config.outputDir)
+    os.mkdir(config.outputDir)
+    os.mkdir(config.outputDirRaw)
+    os.mkdir(config.outputDirDist)
+    os.mkdir(config.outputDirFigs)
+    os.mkdir(config.outputDirFigs + '/bytes')
+    os.mkdir(config.outputDirFigs + '/gap')
+    os.mkdir(config.outputDirFigs + '/sourcePort')
+    os.mkdir(config.outputDirFigs + '/destinationPort')
 
 
 def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
-    csv_file = 'clusters' + addition + '.csv'
+    csv_file = 'clusters' + config.addition + '.csv'
     labels = list(range(len(mapping)))
 
     final_clusters = {}
@@ -125,7 +106,7 @@ def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
         final_probs[lab] = [x for i, x in zip(clu.labels_, clu.probabilities_) if i == lab]
         final_clusters[lab] = [labels[x] for x in occ]
 
-    with open(outputDir + csv_file, 'w') as outfile:
+    with open(config.outputDir + csv_file, 'w') as outfile:
         outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
         for n, cluster in final_clusters.items():
             heatmapClusters[n] = []
@@ -153,9 +134,9 @@ def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey]):
         summary = labelSummary(connectionKeys)
         percentage = summary['percentage']
         if percentage > 0:
-            print(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
+            logging.debug(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
         else:
-            print(f"cluster {n} does not contain any malicious packages, connections: {len(cluster)}")
+            logging.debug(f"cluster {n} does not contain any malicious packages, connections: {len(cluster)}")
 
 
 def labelSummary(connectionKeys: list[ConnectionKey]):
@@ -191,27 +172,27 @@ def generateClusterGraph(labels, projection):
             continue
 
         plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], alpha=0.6)
-    plt.savefig(outputDir + "clustering-result" + addition)
+    plt.savefig(config.outputDir + "clustering-result" + config.addition)
 
 
 def generateClusters(normalizeDistanceMeasurement):
     RS = 3072018
     projection = TSNE(random_state=RS).fit_transform(normalizeDistanceMeasurement)
     plt.scatter(*projection.T)
-    plt.savefig(outputDir + "tsne-result" + addition)
+    plt.savefig(config.outputDir + "tsne-result" + config.addition)
     plt.close()
 
-    model = hdbscan.HDBSCAN(min_cluster_size=minClusterSize, min_samples=minClusterSize, cluster_selection_method='leaf',
+    model = hdbscan.HDBSCAN(min_cluster_size=config.minClusterSize, min_samples=config.minClusterSize, cluster_selection_method='leaf',
                             metric='precomputed')
     clu = model.fit(np.array([np.array(x) for x in normalizeDistanceMeasurement]))  # final for citadel and dridex
 
-    print(f"num clusters: {len(set(clu.labels_)) - 1}")
+    logging.info(f"num clusters: {len(set(clu.labels_)) - 1}")
     avg = 0.0
     for line in list(set(clu.labels_)):
         if line != -1:
             avg += sum([(1 if x == line else 0) for x in clu.labels_])
-    print(f"average size of cluster: {float(avg) / float(len(set(clu.labels_)) - 1)}")
-    print(f"samples in noise: {sum([(1 if x == -1 else 0) for x in clu.labels_])}")
+    logging.info(f"average size of cluster: {float(avg) / float(len(set(clu.labels_)) - 1)}")
+    logging.info(f"samples in noise: {sum([(1 if x == -1 else 0) for x in clu.labels_])}")
 
     return clu, projection
 
@@ -256,19 +237,19 @@ def generateTheGraph(clusterNumber, cluster, values: list[list[PackageInfo]], na
     else:
         plt.figure(figsize=(20.0, 27.0))
 
-    plt.suptitle(f"Exp: {expname} | Cluster: {clusterNumber} | Feature: {name}")
+    plt.suptitle(f"Exp: {config.expname} | Cluster: {clusterNumber} | Feature: {name}")
 
     heatmapDf = pd.DataFrame(heatmapData, index=labelsReordered)
     heatmap = sns.heatmap(heatmapDf, xticklabels=False)
 
     plt.setp(heatmap.get_yticklabels(), rotation=0)
     plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
-    plt.savefig(outputDirFigs + "/" + propertyName + "/" + str(clusterNumber))
+    plt.savefig(config.outputDirFigs + "/" + propertyName + "/" + str(clusterNumber))
     plt.clf()
 
 
 def generateDag(dagClusters, clusterAmount):
-    print('Producing DAG with relationships between pcaps')
+    logging.info('Producing DAG with relationships between pcaps')
 
     array = [x for x in range(-1, clusterAmount - 1)]
     treeprep = dict()
@@ -279,21 +260,21 @@ def generateDag(dagClusters, clusterAmount):
             arr[ind] = 1
         mas = ''.join([str(x) for x in arr[:-1]])
         famname = fam
-        print(filename + "\t" + fam + "\t" + ''.join([str(x) for x in arr[:-1]]))
+        logging.info(filename + "\t" + fam + "\t" + ''.join([str(x) for x in arr[:-1]]))
         if mas not in treeprep.keys():
             treeprep[mas] = dict()
         if famname not in treeprep[mas].keys():
             treeprep[mas][famname] = set()
         treeprep[mas][famname].add(str(filename))
 
-    with open(outputDir + 'mas-details' + addition + '.csv', 'w') as f2:
+    with open(config.outputDir + 'mas-details' + config.addition + '.csv', 'w') as f2:
         for k, v in treeprep.items():
             for kv, vv in v.items():
                 f2.write(str(k) + ';' + str(kv) + ';' + str(len(vv)) + '\n')
 
     graph = {}
     names = {}
-    with open(outputDir + 'mas-details' + addition + '.csv', 'r') as f3:
+    with open(config.outputDir + 'mas-details' + config.addition + '.csv', 'r') as f3:
         csv_reader = csv.reader(f3, delimiter=';')
 
         for line in csv_reader:
@@ -364,7 +345,7 @@ def generateDag(dagClusters, clusterAmount):
     val = set()
     for v in graph.values():
         val.update(v)
-        with open(outputDir + 'relation-tree' + addition + '.dot', 'w') as f2:
+        with open(config.outputDir + 'relation-tree' + config.addition + '.dot', 'w') as f2:
             f2.write("digraph dag {\n")
             f2.write("rankdir=LR;\n")
             for idx, li in names.items():
@@ -386,98 +367,11 @@ def generateDag(dagClusters, clusterAmount):
             f2.write("}")
 
     # Rendering DAG
-    print('Rendering DAG -- using graphviz dot')
+    logging.info('Rendering DAG -- using graphviz dot')
     try:
-        os.system(f'dot -Tpng {outputDir}relation-tree{addition}.dot -o {outputDir}DAG{addition}.png')
+        os.system(f'dot -Tpng {config.outputDir}relation-tree{config.addition}.dot -o {config.outputDir}DAG{config.addition}.png')
     except:
         pass
-
-
-def normalizedDistanceMeasurement(*args):
-    return sum(args) / len(args)
-
-
-def normalizedByteDistance(values: list[list[PackageInfo]]):
-    filename = 'bytesDist' + addition + '.txt'
-
-    lenth = len(values)
-    bytesDistances = np.zeros((lenth, thresh))
-
-    for i, value in enumerate(values):
-        bytesDistances[i] = [x.bytes for x in value]
-
-    distm = dtw_distance(bytesDistances)
-
-    with open(outputDirDist + filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-    return distm / distm.max()
-
-
-def normalizedGapsDistance(values: list[list[PackageInfo]]):
-    filename = 'gapsDist' + addition + '.txt'
-
-    lenth = len(values)
-
-    gapsDistances = np.zeros((lenth, thresh))
-
-    for i, value in enumerate(values):
-        gapsDistances[i] = [x.gap for x in value]
-
-    distm = dtw_distance(gapsDistances)
-
-    with open(outputDirDist + filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-    return distm / distm.max()
-
-
-def normalizedSourcePortDistance(values: list[list[PackageInfo]]):
-    filename = 'sportDist' + addition + '.txt'
-
-    ngrams = generateNGrams('sourcePort', values)
-
-    return generateCosineDistanceFromNGramsAndSave(filename, ngrams)
-
-
-def normalizedDestinationPortDistance(values: list[list[PackageInfo]]):
-    filename = 'dportDist' + addition + '.txt'
-
-    ngrams = generateNGrams('destinationPort', values)
-
-    return generateCosineDistanceFromNGramsAndSave(filename, ngrams)
-
-
-def generateCosineDistanceFromNGramsAndSave(filename, ngrams):
-    distm = ngram_distance(ngrams)
-
-    with open(outputDirDist + filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
-
-    return distm
-
-
-def generateNGrams(attribute, values: list[list[PackageInfo]]):
-    ngrams = List()
-    for value in values:
-        profile = Dict.empty(types.int64, types.int64)
-
-        dat = [getattr(x, attribute) for x in value]
-
-        li = zip(dat, dat[1:], dat[2:])
-
-        for b in li:
-            key = hash(b)
-            if key not in profile:
-                profile[key] = 0
-
-            profile[key] += 1
-
-        ngrams.append(profile)
-    return ngrams
 
 
 def difference(str1, str2):
@@ -495,7 +389,7 @@ def inet_to_str(inet: bytes) -> str:
 def readLabeled(filename) -> (dict[int, str], int):
     labelsFilename = filename.replace("pcap", "labeled")
     if not os.path.exists(labelsFilename):
-        print(f"Label file for {filename} doesn't exist")
+        logging.info(f"Label file for {filename} doesn't exist")
         return {}, 0
 
     connectionLabels = {}
@@ -522,7 +416,7 @@ def readLabeled(filename) -> (dict[int, str], int):
 
             connectionLabels[key] = labeling[2]
 
-    print(f'Done reading {len(connectionLabels)} labels...')
+    logging.info(f'Done reading {len(connectionLabels)} labels...')
 
     return connectionLabels, line_count
 
@@ -554,16 +448,16 @@ def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
             if len(preProcessed[key]) > cutOff:
                 reachedSizeLimit.append(key)
 
-    print(f'Before cleanup: {len(preProcessed)} connections.')
+    logging.info(f'Before cleanup: {len(preProcessed)} connections.')
 
     flattened = []
     for values in preProcessed.values():
-        if len(values) < thresh:
+        if len(values) < config.thresh:
             continue
         flattened.extend(values)
     del preProcessed
 
-    print(f'After cleanup: {len(flattened)} packages.')
+    logging.info(f'After cleanup: {len(flattened)} packages.')
 
     connections = defaultdict(list)
     previousTimestamp = {}
@@ -607,10 +501,10 @@ def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
 
         connections[key].append(flow_data)
 
-    return {key: value for (key, value) in connections.items() if len(value) >= thresh}
+    return {key: value for (key, value) in connections.items() if len(value) >= config.thresh}
 
 
-def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True):
+def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=True):
     meta = {}
     mapping = {}
     totalLabels = defaultdict(int)
@@ -619,7 +513,7 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
         files = glob.glob(sys.argv[2] + "/*.pcap.pkl")
     else:
         files = glob.glob(sys.argv[2] + "/**/*.pcap")
-    print(f'About to read pcap... from {len(files)} files')
+    logging.info(f'About to read pcap... from {len(files)} files')
 
     if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and useCache:
         with open('data/meta.pkl', 'rb') as file:
@@ -631,15 +525,15 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
             cacheKey = os.path.basename(f)
             cacheName = f'data/{cacheKey}.pkl'
             if os.path.exists(cacheName) and useFileCache:
-                print(f'Using cache: {cacheKey}')
+                logging.debug(f'Using cache: {cacheKey}')
                 with open(cacheName, 'rb') as file:
                     connections = pickle.load(file)
             elif os.path.exists(f) and forceFileCacheUse:
-                print(f'Using cache: {cacheKey}')
+                logging.debug(f'Using cache: {cacheKey}')
                 with open(f, 'rb') as file:
                     connections = pickle.load(file)
             elif not forceFileCacheUse:
-                print(f'Reading file: {cacheKey}')
+                logging.info(f'Reading file: {cacheKey}')
                 connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f))
 
                 if len(connections.items()) < 1:
@@ -648,7 +542,7 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
                 with open(cacheName, 'wb') as file:
                     pickle.dump(connections, file)
             else:
-                print(f'Skipping {f} because it has no cache file: {cacheName}')
+                logging.info(f'Skipping {f} because it has no cache file: {cacheName}')
                 continue
 
             connectionItems: list[(ConnectionKey, list[PackageInfo])] = list(connections.items())
@@ -659,7 +553,7 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
                 wantedWindow = getWantedWindow(v)
 
                 for window in wantedWindow:
-                    selection: list[PackageInfo] = v[thresh * window:thresh * (window + 1)]
+                    selection: list[PackageInfo] = v[config.thresh * window:config.thresh * (window + 1)]
                     labels = set()
                     for package in selection:
                         labels.add(package.connectionLabel)
@@ -688,11 +582,11 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
         with open('data/mapping.pkl', 'wb') as file:
             pickle.dump(mapping, file)
 
-    print(f'Collective surviving connections {len(meta)}')
+    logging.info(f'Collective surviving connections {len(meta)}')
     connectionSummary(meta, totalLabels)
 
     if len(meta) < 50:
-        print('Too little connections to create clustering')
+        logging.error('Too little connections to create clustering')
         raise Exception
 
     return meta, mapping
@@ -700,9 +594,11 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
 
 def getWantedWindow(v):
     amountOfPackages = len(v)
-    windowRange = list(range(amountOfPackages // thresh))
+    windowRange = list(range(amountOfPackages // config.thresh))
     possibleWindows = len(windowRange)
 
+    if possibleWindows == 0:
+        return []
     if possibleWindows == 1:
         return [0]
     elif possibleWindows == 2:
@@ -714,22 +610,21 @@ def getWantedWindow(v):
 
 
 def timeFunction(name, fun: Callable[[], T]) -> T:
-    print(f"Started {name}...")
+    logging.debug(f"Started {name}...")
     startTime = time.perf_counter()
     value = fun()
     endTime = time.perf_counter()
-    print(f"Completed {name} in {endTime - startTime:0.4f} seconds")
+    logging.debug(f"Completed {name} in {endTime - startTime:0.4f} seconds")
     return value
 
 
 def connectionSummary(connections, selectedLabelsPerFile):
     connectionLengths = [len(x) for i, x in connections.items()]
-    print("Different connections: ", len(connections))
-    print("Average conn length: ", np.mean(connectionLengths))
-    print("Minimum conn length: ", np.min(connectionLengths))
-    print("Maximum conn length: ", np.max(connectionLengths))
-    print(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'benign: {x[1]}', selectedLabelsPerFile.items())))
-    print('----------------')
+    logging.debug(f"Different connections: {len(connections)}")
+    logging.debug(f"Average conn length: {np.mean(connectionLengths)}")
+    logging.debug(f"Minimum conn length: {np.min(connectionLengths)}")
+    logging.debug(f"Maximum conn length: {np.max(connectionLengths)}")
+    logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'benign: {x[1]}', selectedLabelsPerFile.items())))
 
 
 def execute():
@@ -739,8 +634,8 @@ def execute():
 
 def main():
     if len(sys.argv) < 2:
-        print('incomplete command')
+        logging.error('incomplete command')
     elif sys.argv[1] == 'folder':
         timeFunction("totalRuntime", lambda: execute())
     else:
-        print('incomplete command')
+        logging.error('incomplete command')

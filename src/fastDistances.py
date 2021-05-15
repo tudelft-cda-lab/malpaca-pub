@@ -1,13 +1,12 @@
 import numpy as np
 from numba import prange, njit
 from numba.typed import List
-from numba.core import types
 
-__all__ = ['dtw_distance']
+__all__ = ['dtwDistance', 'ngramDistance']
 
 
 @njit(parallel=True, nogil=True)
-def dtw_distance(dataset):
+def dtwDistance(dataset):
     """
     Computes the dataset DTW distance matrix using multiprocessing.
     Args:
@@ -28,7 +27,7 @@ def dtw_distance(dataset):
 
 
 @njit(parallel=True, nogil=True)
-def ngram_distance(dataset):
+def ngramDistance(dataset):
     """
     Computes the dataset ngram distance matrix using multiprocessing.
     Args:
