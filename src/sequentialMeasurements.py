@@ -13,7 +13,7 @@ def getSequentialNormalizedDistanceMeasurement(values):
     ndmSourcePort = normalizedSourcePortDistance(values)
     ndmDestinationPort = normalizedDestinationPortDistance(values)
 
-    return normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
+    return [], normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
 
 
 def normalizedDistanceMeasurement(*args):
@@ -57,7 +57,7 @@ def normalizedGapsDistance(values: list[list[PackageInfo]]):
 def normalizedSourcePortDistance(values: list[list[PackageInfo]]):
     filename = 'sportDist' + config.addition + '.txt'
 
-    ngrams = generateNGrams('sourcePort', values)
+    ngrams = generateNGrams(PackageInfo.sourcePort.__name__, values)
 
     return generateCosineDistanceFromNGramsAndSave(filename, ngrams)
 
@@ -65,7 +65,7 @@ def normalizedSourcePortDistance(values: list[list[PackageInfo]]):
 def normalizedDestinationPortDistance(values: list[list[PackageInfo]]):
     filename = 'dportDist' + config.addition + '.txt'
 
-    ngrams = generateNGrams('destinationPort', values)
+    ngrams = generateNGrams(PackageInfo.destinationPort.__name__, values)
 
     return generateCosineDistanceFromNGramsAndSave(filename, ngrams)
 

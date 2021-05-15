@@ -1,41 +1,69 @@
 import numpy as np
 from fastdist import fastdist
+from sklearn.preprocessing import normalize
 
-from models import PackageInfo
+from models import PackageInfo, StatisticalAnalysisProperties
 from sequentialMeasurements import normalizedSourcePortDistance, normalizedDestinationPortDistance
 
 smallPacket = range(63, 400 + 1)
-uSToMs = 1 / 1e3
 uSToS = 1 / 1e6
 
+
 def getStatisticalNormalizedDistanceMeasurement(values):
-    ndm = normalizedStatisticalDistance(values)
+    normalizedProperties = getPropertiesFromValues(values)
+    ndm = normalizedStatisticalDistance(normalizedProperties)
     ndmSourcePort = normalizedSourcePortDistance(values)
     ndmDestinationPort = normalizedDestinationPortDistance(values)
 
-    return 0.8 * ndm + 0.1 * ndmSourcePort + 0.1 * ndmDestinationPort
+    # return ndm
+    return normalizedProperties, np.average([ndm, ndmSourcePort, ndmDestinationPort], weights=[len(StatisticalAnalysisProperties.__slots__), 1, 1], axis=0)
 
 
-def normalizedStatisticalDistance(values: list[list[PackageInfo]]):
-    distances = np.zeros((len(values), 11))
-
-    for i, value in enumerate(values):
-        bytesValues = [x.bytes for x in value]
-        gapsValues = [x.gap for x in value]
-        destinationPortValues = [x.destinationPort for x in value]
-        sourcePortValues = [x.sourcePort for x in value]
-        distances[i][0] = np.sum([byte in smallPacket for byte in bytesValues])  # NSP
-        distances[i][1] = np.average(gapsValues) * uSToMs  # AIT
-        distances[i][2] = np.sum(bytesValues)  # TBT
-        distances[i][3] = np.average(bytesValues)  # APL
-        distances[i][4] = np.std(bytesValues)  # PV
-        distances[i][5] = len(set(bytesValues))  # DPL
-        distances[i][6] = bytesValues.count(distances[i][2])  # MP
-        distances[i][7] = np.sum(gapsValues) * uSToS  # PPS
-        distances[i][8] = distances[i][2] / distances[i][7]  # BPS
-        distances[i][9] = len(set(destinationPortValues))  # uniqueDestinationPortCount
-        distances[i][10] = len(set(sourcePortValues))  # uniqueSourcePortCount
-
-    distm = fastdist.matrix_pairwise_distance(distances, fastdist.euclidean, "euclidean", return_matrix=True)
+def normalizedStatisticalDistance(normalizedProperties):
+    distm = fastdist.matrix_pairwise_distance(normalizedProperties, fastdist.sqeuclidean, "sqeuclidean", return_matrix=True)
 
     return distm / distm.max()
+
+
+def getPropertiesFromValues(values: list[list[PackageInfo]]):
+    properties = []
+
+    for i, packets in enumerate(values):
+        pBytes = []
+        pGaps = []
+        destinationPorts = []
+        sourcePorts = []
+
+        for packet in packets:
+            pBytes.append(packet.bytes)
+            pGaps.append(packet.gap)
+            destinationPorts.append(packet.destinationPort)
+            sourcePorts.append(packet.sourcePort)
+
+        TBT = np.sum(pBytes)
+        MX = np.max(pBytes)
+        PPS = min(max(0.01, np.sum(pGaps) * uSToS), 1000)
+
+        properties.append(StatisticalAnalysisProperties(
+            NSP=np.sum([byte in smallPacket for byte in pBytes]),
+            AIT=np.average(pGaps) * uSToS,
+            TBT=TBT,
+            APL=np.average(pBytes),
+            PV=np.std(pBytes),
+            DPL=len(set(pBytes)),
+            MX=MX,
+            MP=pBytes.count(MX),
+            PPS=PPS,
+            BPS=min(max(0.1, TBT / PPS), 10000),
+            USP=len(set(sourcePorts)),
+            UDP=len(set(destinationPorts))
+        ))
+
+    ## Save before outputting?
+
+    distances = np.zeros((len(properties), len(StatisticalAnalysisProperties.__slots__)))
+
+    for i, pProperty in enumerate(properties):
+        distances[i] = pProperty.__array__()
+
+    return normalize(distances, axis=0, norm='max')

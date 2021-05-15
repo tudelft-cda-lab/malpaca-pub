@@ -26,7 +26,7 @@ from sklearn.manifold import TSNE
 from tqdm import tqdm
 
 import config
-from models import PackageInfo, ConnectionKey
+from models import PackageInfo, ConnectionKey, StatisticalAnalysisProperties
 from sequentialMeasurements import getSequentialNormalizedDistanceMeasurement
 from statisticalMeasurements import getStatisticalNormalizedDistanceMeasurement
 
@@ -53,7 +53,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     storeRawData(values)
 
-    normalizeDistanceMeasurement = timeFunction(getStatisticalNormalizedDistanceMeasurement.__name__, lambda: getStatisticalNormalizedDistanceMeasurement(values))
+    properties, normalizeDistanceMeasurement = timeFunction(getStatisticalNormalizedDistanceMeasurement.__name__, lambda: getStatisticalNormalizedDistanceMeasurement(values))
 
     clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
 
@@ -66,7 +66,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
     if generateGraph:
         # clusterAmount = len(finalClusters)
         # generateDag(dagClusters, clusterAmount)
-        timeFunction(generateGraphs.__name__, lambda: generateGraphs(heatmapCluster, values))
+        timeFunction(generateGraphs.__name__, lambda: generateGraphs(heatmapCluster, values, properties))
 
 
 def storeRawData(values):
@@ -90,6 +90,7 @@ def generateOutputFolders():
     os.mkdir(config.outputDirFigs + '/gap')
     os.mkdir(config.outputDirFigs + '/sourcePort')
     os.mkdir(config.outputDirFigs + '/destinationPort')
+    os.mkdir(config.outputDirFigs + '/statistics')
 
 
 def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
@@ -197,26 +198,37 @@ def generateClusters(normalizeDistanceMeasurement):
     return clu, projection
 
 
-def generateGraphs(clusterInfo, values: list[list[PackageInfo]]):
+def generateGraphs(clusterInfo, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties]):
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
-    with tqdm(total=(4 * len(clusterInfo)), unit='graphs') as t:
-        for name, propertyName in [("Packet sizes", "bytes"), ("Interval", "gap"), ("Source Port", "sourcePort"), ("Dest. Port", "destinationPort")]:
+
+    wantedFeatures = [
+        # ("Packet sizes", PackageInfo.bytes.__name__),
+        # ("Interval", PackageInfo.gap.__name__),
+        # ("Source Port", PackageInfo.sourcePort.__name__),
+        # ("Dest. Port", PackageInfo.destinationPort.__name__),
+        ("Statistics", "statistics")
+    ]
+
+    with tqdm(total=(len(wantedFeatures) * len(clusterInfo)), unit='graphs') as t:
+        for name, propertyName in wantedFeatures:
             for clusterNumber, cluster in clusterInfo.items():
                 t.set_description_str(f"Working on {name}, cluster #{clusterNumber}")
-                generateTheGraph(clusterNumber, cluster, values, name, propertyName)
+                generateTheGraph(clusterNumber, cluster, values, properties, name, propertyName)
                 t.update(1)
+        t.set_description_str(f"Done generating graphs")
 
 
-def generateTheGraph(clusterNumber, cluster, values: list[list[PackageInfo]], name, propertyName):
+def generateTheGraph(clusterNumber, clusters, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties], name, propertyName):
     labels = []
     clusterMapData = []
 
-    for cluster in cluster:
+    for cluster in clusters:
         labels.append(cluster[1])
-        connection = values[cluster[0]]
-        if propertyName == 'gap':
-            clusterMapData.append([package.__getattribute__(propertyName) / 1000 for package in connection])
+        valueIndex = cluster[0]
+        connection = values[valueIndex]
+        if propertyName == 'statistics':
+            clusterMapData.append(properties[valueIndex])
         else:
             clusterMapData.append([package.__getattribute__(propertyName) for package in connection])
 
@@ -230,20 +242,31 @@ def generateTheGraph(clusterNumber, cluster, values: list[list[PackageInfo]], na
         labelsReordered.append(labels[it])
         heatmapData.append(clusterMapData[it])
 
-    if len(cluster) <= 50:
+    if len(clusters) <= 50:
         plt.figure(figsize=(15.0, 9.0))
-    elif len(cluster) <= 100:
+    elif len(clusters) <= 100:
         plt.figure(figsize=(15.0, 18.0))
     else:
         plt.figure(figsize=(20.0, 27.0))
 
     plt.suptitle(f"Exp: {config.expname} | Cluster: {clusterNumber} | Feature: {name}")
 
-    heatmapDf = pd.DataFrame(heatmapData, index=labelsReordered)
-    heatmap = sns.heatmap(heatmapDf, xticklabels=False)
+    if propertyName == 'statistics':
+        heatmapDf = pd.DataFrame(heatmapData, index=labelsReordered, columns=StatisticalAnalysisProperties.__slots__)
+        heatmap = sns.heatmap(heatmapDf, annot=True if clusterNumber != -1 else False, vmin=0, vmax=1, fmt=".3f")
+    else:
+        heatmapDf = pd.DataFrame(heatmapData, index=labelsReordered)
+        heatmap = sns.heatmap(heatmapDf, xticklabels=False)
 
     plt.setp(heatmap.get_yticklabels(), rotation=0)
-    plt.subplots_adjust(top=0.92, bottom=0.02, left=0.25, right=1, hspace=0.94)
+
+    if len(clusters) <= 50:
+        plt.subplots_adjust(top=0.93, bottom=0.06, left=0.25, right=1.05)
+    elif len(clusters) <= 100:
+        plt.subplots_adjust(top=0.95, bottom=0.04, left=0.225, right=1.025)
+    else:
+        plt.subplots_adjust(top=0.97, bottom=0.02, left=0.2, right=1)
+
     plt.savefig(config.outputDirFigs + "/" + propertyName + "/" + str(clusterNumber))
     plt.clf()
 
@@ -504,7 +527,7 @@ def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
     return {key: value for (key, value) in connections.items() if len(value) >= config.thresh}
 
 
-def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=True):
+def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True):
     meta = {}
     mapping = {}
     totalLabels = defaultdict(int)
@@ -624,7 +647,8 @@ def connectionSummary(connections, selectedLabelsPerFile):
     logging.debug(f"Average conn length: {np.mean(connectionLengths)}")
     logging.debug(f"Minimum conn length: {np.min(connectionLengths)}")
     logging.debug(f"Maximum conn length: {np.max(connectionLengths)}")
-    logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'benign: {x[1]}', selectedLabelsPerFile.items())))
+    if selectedLabelsPerFile:
+        logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'benign: {x[1]}', selectedLabelsPerFile.items())))
 
 
 def execute():
