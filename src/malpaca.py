@@ -538,11 +538,13 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
         files = glob.glob(sys.argv[2] + "/**/*.pcap")
     logging.info(f'About to read pcap... from {len(files)} files')
 
-    if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and useCache:
+    if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and os.path.exists('data/totalLabels.pkl') and useCache:
         with open('data/meta.pkl', 'rb') as file:
             meta = pickle.load(file)
         with open('data/mapping.pkl', 'rb') as file:
             mapping = pickle.load(file)
+        with open('data/totalLabels.pkl', 'rb') as file:
+            totalLabels = pickle.load(file)
     else:
         for f in files:
             cacheKey = os.path.basename(f)
@@ -604,6 +606,8 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
             pickle.dump(meta, file)
         with open('data/mapping.pkl', 'wb') as file:
             pickle.dump(mapping, file)
+        with open('data/totalLabels.pkl', 'wb') as file:
+            pickle.dump(totalLabels, file)
 
     logging.info(f'Collective surviving connections {len(meta)}')
     connectionSummary(meta, totalLabels)

@@ -14,4 +14,4 @@ outputDirRaw = outputDir + 'raw/'
 outputDirDist = outputDir + 'dist/'
 outputDirFigs = outputDir + 'figs' + addition
 
-minClusterSize = 20
+minClusterSize = 24
