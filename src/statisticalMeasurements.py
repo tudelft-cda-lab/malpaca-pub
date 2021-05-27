@@ -15,7 +15,7 @@ commonPorts = [25, 53, 80, 119, 123, 143, 161, 443, 5353]
 uSToS = 1 / 1e6
 
 
-def getStatisticalNormalizedDistanceMeasurement(values, useCache=False):
+def getStatisticalNormalizedDistanceMeasurement(values, useCache=True):
     if os.path.exists('data/statisticalDistance.pkl') and os.path.exists('data/normalizedProperties.pkl') and useCache:
         logging.debug("Using cache for statisticalDistance")
         with open('data/statisticalDistance.pkl', 'rb') as file:

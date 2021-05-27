@@ -53,19 +53,19 @@ class PackageInfo:
 class StatisticalAnalysisProperties:
     """"
     Params:
-        NSP (int): Number of small packets (len of 63 - 400 bytes).
-        AIT (float): Average arrival time of packets.
-        TBT (float): Total number of transmitted bytes.
-        APL (float): Average payload packet length for time interval.
-        PV (float): Standard deviation of payload packet length.
-        DPL (int): The total of number of different packet sizes.
-        MX (int): Size of largest package
-        MP (int): The total number of bytes transmitted by the largest packet.
-        PPS (float): Number of packets per second.
-        BPS (float): Average bits-per-second.
-        USP (int): Total number of unique Source ports.
-        UDP (int): Total number of unique Destination ports.
-        CP (int): Common ports in Source and Destination ports
+        NSP (int)& Number of small packets (len of 63 - 400 bytes).
+        AIT (float)& Average arrival time of packets.
+        TBT (float)& Total number of transmitted bytes.
+        APL (float)& Average payload packet length for time interval.
+        PV (float)& Standard deviation of payload packet length.
+        DPL (int)& The total of number of different packet sizes.
+        MX (int)& Size of largest package
+        MP (int)& The total number of bytes transmitted by the largest packet.
+        PPS (float)& Number of packets per second.
+        BPS (float)& Average bits-per-second.
+        USP (int)& Total number of unique Source ports.
+        UDP (int)& Total number of unique Destination ports.
+        CP (int)& Common ports in Source and Destination ports
     """
     __slots__ = ['NSP', 'AIT', 'TBT', 'APL', 'PV', 'DPL', 'MX', 'MP', 'PPS', 'BPS', 'USP', 'UDP', 'CP']
     NSP: int

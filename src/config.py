@@ -14,6 +14,6 @@ outputDirRaw = outputDir + 'raw/'
 outputDirDist = outputDir + 'dist/'
 outputDirFigs = outputDir + 'figs' + addition
 
-minClusterSize = 15
+minClusterSize = 20
 
 useStatistical = True

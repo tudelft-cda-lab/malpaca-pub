@@ -140,11 +140,11 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name):
     clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement, name))
 
-    timeFunction(generateClusterGraph.__name__, lambda: generateClusterGraph(clu.labels_, projection, name))
+    timeFunction(generateClusterGraph.__name__, lambda: generateClusterGraph(clu, projection, name))
 
     finalClusters, dagClusters, heatmapCluster = saveClustersToCsv(clu, mapping, inv_mapping, name)
 
-    finalClusterSummary(finalClusters, inv_mapping)
+    finalClusterSummary(finalClusters, inv_mapping, normalizeDistanceMeasurement, name)
 
     return finalClusters, heatmapCluster
 
@@ -205,8 +205,31 @@ def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey], extra
     return final_clusters, dagClusters, heatmapClusters
 
 
-def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey]):
+def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey], normalizeDistanceMeasurement, name):
+    cohesions = {}
+    separations = {}
     for n, cluster in finalClusters.items():
+        if n == -1:
+            continue
+
+        clusterDistances = normalizeDistanceMeasurement[cluster]
+        meanDistances = np.average(clusterDistances[:, cluster])
+        cohesions[n] = meanDistances
+
+        smallestDistance = sys.maxsize
+        for n2, cluster2 in finalClusters.items():
+            if n == n2 or n2 == -1:
+                continue
+
+            meanDistanceToCluster = np.average(clusterDistances[:, cluster2])
+            if meanDistanceToCluster < smallestDistance:
+                smallestDistance = meanDistanceToCluster
+
+        separations[n] = smallestDistance
+
+    for n, cluster in finalClusters.items():
+        if n == -1:
+            continue
         connectionKeys = []
 
         for connectionNumber in cluster:
@@ -214,10 +237,15 @@ def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey]):
 
         summary = labelSummary(connectionKeys)
         percentage = summary['percentage']
+        cohesion = round(cohesions[n], 4)
+        separation = round(separations[n], 4)
+
         if percentage > 0:
-            logging.debug(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
+            logging.debug(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}, Cohesion: {cohesion}, Separation: {separation}")
         else:
-            logging.debug(f"cluster {n} does not contain any malicious packages, connections: {len(cluster)}")
+            logging.debug(f"cluster {n} does not contain any malicious packages, connections: {len(cluster)}, Cohesion: {cohesion}, Separation: {separation}")
+
+    logging.info(f"{name}: Average cohesion {np.average(list(cohesions.values()))}, Average separation: {np.average(list(separations.values()))}")
 
 
 def labelSummary(connectionKeys: list[ConnectionKey]):
@@ -235,7 +263,9 @@ def labelSummary(connectionKeys: list[ConnectionKey]):
     return summary
 
 
-def generateClusterGraph(labels, projection, nameString):
+def generateClusterGraph(clusters, projection, extraName):
+    labels = clusters.labels_
+
     colors = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
               'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
               'maroon', 'deepskyblue', 'silver']
@@ -252,8 +282,8 @@ def generateClusterGraph(labels, projection, nameString):
         if txt == -1:
             continue
 
-        plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], alpha=0.6)
-    plt.savefig(f'{config.outputDir}clustering-result-{nameString}{config.addition}')
+        plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], zorder=100)
+    plt.savefig(f'{config.outputDir}clustering-result-{extraName}{config.addition}')
     plt.clf()
 
 
@@ -266,7 +296,7 @@ def generateClusters(normalizeDistanceMeasurement, extraName):
 
     model = hdbscan.HDBSCAN(min_cluster_size=config.minClusterSize, min_samples=config.minClusterSize, cluster_selection_method='leaf',
                             metric='precomputed')
-    clu = model.fit(np.array([np.array(x) for x in normalizeDistanceMeasurement]))  # final for citadel and dridex
+    clu = model.fit(normalizeDistanceMeasurement)  # final for citadel and dridex
 
     logging.info(f"num clusters: {len(set(clu.labels_)) - 1}")
     avg = 0.0
