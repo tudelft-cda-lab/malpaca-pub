@@ -59,14 +59,15 @@ class StatisticalAnalysisProperties:
         APL (float): Average payload packet length for time interval.
         PV (float): Standard deviation of payload packet length.
         DPL (int): The total of number of different packet sizes.
-        Mx (int): Size of largest package
+        MX (int): Size of largest package
         MP (int): The total number of bytes transmitted by the largest packet.
         PPS (float): Number of packets per second.
         BPS (float): Average bits-per-second.
         USP (int): Total number of unique Source ports.
         UDP (int): Total number of unique Destination ports.
+        CP (int): Common ports in Source and Destination ports
     """
-    __slots__ = ['NSP', 'AIT', 'TBT', 'APL', 'PV', 'DPL', 'MX', 'MP', 'PPS', 'BPS', 'USP', 'UDP']
+    __slots__ = ['NSP', 'AIT', 'TBT', 'APL', 'PV', 'DPL', 'MX', 'MP', 'PPS', 'BPS', 'USP', 'UDP', 'CP']
     NSP: int
     AIT: float
     TBT: float
@@ -79,9 +80,13 @@ class StatisticalAnalysisProperties:
     BPS: float
     USP: int
     UDP: int
+    CP: int
 
     def __array__(self) -> np.ndarray:
         return np.array([getattr(self, attribute) for attribute in self.__slots__])
+
+    def __str__(self):
+        return ';'.join(str(getattr(self, attribute)) for attribute in self.__slots__)
 
     def __getstate__(self):
         return dict(

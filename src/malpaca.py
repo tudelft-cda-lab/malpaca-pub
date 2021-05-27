@@ -44,6 +44,68 @@ plt.rcParams.update({'figure.max_open_warning': 0})
 warnings.filterwarnings("ignore", message="Attempting to set identical left == right")
 
 
+def compareFinalClusters(finalClustersSequential, finalClustersStatistical):
+    similarityArray = np.zeros((len(finalClustersSequential), len(finalClustersStatistical)))
+
+    for number, cluster in finalClustersSequential.items():
+        for number2, cluster2 in finalClustersStatistical.items():
+            setOne = set(cluster)
+            setTwo = set(cluster2)
+            similarityArray[number+1][number2+1] = len(setOne & setTwo)
+
+    logging.info('------------------------ Sequential to Statistical')
+
+    maxesColumns = np.argmax(similarityArray, axis=1)
+    for index in range(len(finalClustersSequential)):
+        maxIndex = maxesColumns[index]
+        maxValue = round(similarityArray[index][maxIndex])
+
+        sequentialIndex = index-1
+        statisticalIndex = maxIndex-1
+
+        packetsInSequentialCluster = len(finalClustersSequential[sequentialIndex])
+        packetsInStatisticalCluster = len(finalClustersStatistical[statisticalIndex])
+        totalUnique = packetsInSequentialCluster + packetsInSequentialCluster - maxValue
+
+        if sequentialIndex == -1 and statisticalIndex == -1:
+            logging.info(f'There was an overlap of {round(maxValue/totalUnique * 100, 2)}% of the non-clustered data of {totalUnique} packages')
+        elif statisticalIndex == -1:
+            logging.info(f'{sequentialIndex} (Sequential) containing {packetsInSequentialCluster} packages, was mostly not clustered by Statistical')
+        elif maxValue == packetsInStatisticalCluster:
+            logging.info(f'{statisticalIndex} (Sequential) cluster is fully contained in {sequentialIndex} (Statistical) cluster')
+        elif maxValue == packetsInSequentialCluster:
+            logging.info(f'{sequentialIndex} (Statistical) cluster is fully contained in {statisticalIndex} (Sequential) cluster')
+        else:
+            logging.info(f'Overlap between {sequentialIndex} (Sequential) and {statisticalIndex} (Statistical) is {round(maxValue/totalUnique * 100, 2)}% of {totalUnique} packages')
+
+    logging.info('------------------------ Statistical to Sequential')
+
+    maxesRows = np.argmax(similarityArray, axis=0)
+    for index in range(len(finalClustersStatistical)):
+        maxIndex = maxesRows[index]
+        maxValue = round(similarityArray[maxIndex][index])
+
+        statisticalIndex = index-1
+        sequentialIndex = maxIndex-1
+
+        packetsInStatisticalCluster = len(finalClustersStatistical[statisticalIndex])
+        packetsInSequentialCluster = len(finalClustersSequential[sequentialIndex])
+        totalUnique = packetsInSequentialCluster + packetsInSequentialCluster - maxValue
+
+        if statisticalIndex == -1 and sequentialIndex == -1:
+            logging.info(f'There was an overlap of {round(maxValue/totalUnique * 100, 2)}% of the non-clustered data of {totalUnique} packages')
+        elif sequentialIndex == -1:
+            logging.info(f'{statisticalIndex} (Statistical) containing {packetsInStatisticalCluster} packages, was mostly not clustered by Sequential')
+        elif maxValue == packetsInStatisticalCluster:
+            logging.info(f'{statisticalIndex} (Sequential) cluster is fully contained in {sequentialIndex} (Statistical) cluster')
+        elif maxValue == packetsInSequentialCluster:
+            logging.info(f'{sequentialIndex} (Statistical) cluster is fully contained in {statisticalIndex} (Sequential) cluster')
+        else:
+            logging.info(f'Overlap between {statisticalIndex} (Statistical) and {sequentialIndex} (Sequential) is {round(maxValue/totalUnique * 100, 2)}% of {totalUnique} packages')
+
+    logging.info('------------------------')
+
+
 def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=True):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
@@ -53,20 +115,38 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     storeRawData(values)
 
-    properties, normalizeDistanceMeasurement = timeFunction(getStatisticalNormalizedDistanceMeasurement.__name__, lambda: getStatisticalNormalizedDistanceMeasurement(values))
+    sequentialProperties, normalizeDistanceMeasurementStatistical = timeFunction(
+        getStatisticalNormalizedDistanceMeasurement.__name__,
+        lambda: getStatisticalNormalizedDistanceMeasurement(values)
+    )
 
-    clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement))
+    normalizeDistanceMeasurementSequential = timeFunction(
+        getSequentialNormalizedDistanceMeasurement.__name__,
+        lambda: getSequentialNormalizedDistanceMeasurement(values)
+    )
 
-    generateClusterGraph(clu.labels_, projection)
+    finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical')
+    finalClustersSequential, heatmapClusterSequential = processMeasurements(normalizeDistanceMeasurementSequential, mapping, inv_mapping, 'Sequential')
 
-    finalClusters, dagClusters, heatmapCluster = saveClustersToCsv(clu, mapping, inv_mapping)
-
-    finalClusterSummary(finalClusters, inv_mapping)
+    # compareFinalClusters(finalClustersSequential, finalClustersStatistical)
 
     if generateGraph:
         # clusterAmount = len(finalClusters)
         # generateDag(dagClusters, clusterAmount)
-        timeFunction(generateGraphs.__name__, lambda: generateGraphs(heatmapCluster, values, properties))
+        timeFunction(generateGraphs.__name__, lambda: generateGraphs('Statistical', heatmapClusterStatistical, values, sequentialProperties))
+        timeFunction(generateGraphs.__name__, lambda: generateGraphs('Sequential', heatmapClusterSequential, values, []))
+
+
+def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name):
+    clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement, name))
+
+    timeFunction(generateClusterGraph.__name__, lambda: generateClusterGraph(clu.labels_, projection, name))
+
+    finalClusters, dagClusters, heatmapCluster = saveClustersToCsv(clu, mapping, inv_mapping, name)
+
+    finalClusterSummary(finalClusters, inv_mapping)
+
+    return finalClusters, heatmapCluster
 
 
 def storeRawData(values):
@@ -93,8 +173,8 @@ def generateOutputFolders():
     os.mkdir(config.outputDirFigs + '/statistics')
 
 
-def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey]):
-    csv_file = 'clusters' + config.addition + '.csv'
+def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey], extraName):
+    csv_file = f'clusters-{extraName}{config.addition}.csv'
     labels = list(range(len(mapping)))
 
     final_clusters = {}
@@ -155,7 +235,7 @@ def labelSummary(connectionKeys: list[ConnectionKey]):
     return summary
 
 
-def generateClusterGraph(labels, projection):
+def generateClusterGraph(labels, projection, nameString):
     colors = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
               'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
               'maroon', 'deepskyblue', 'silver']
@@ -173,15 +253,16 @@ def generateClusterGraph(labels, projection):
             continue
 
         plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], alpha=0.6)
-    plt.savefig(config.outputDir + "clustering-result" + config.addition)
+    plt.savefig(f'{config.outputDir}clustering-result-{nameString}{config.addition}')
+    plt.clf()
 
 
-def generateClusters(normalizeDistanceMeasurement):
+def generateClusters(normalizeDistanceMeasurement, extraName):
     RS = 3072018
     projection = TSNE(random_state=RS).fit_transform(normalizeDistanceMeasurement)
     plt.scatter(*projection.T)
-    plt.savefig(config.outputDir + "tsne-result" + config.addition)
-    plt.close()
+    plt.savefig(f'{config.outputDir}tsne-result-{extraName}{config.addition}')
+    plt.clf()
 
     model = hdbscan.HDBSCAN(min_cluster_size=config.minClusterSize, min_samples=config.minClusterSize, cluster_selection_method='leaf',
                             metric='precomputed')
@@ -198,7 +279,7 @@ def generateClusters(normalizeDistanceMeasurement):
     return clu, projection
 
 
-def generateGraphs(clusterInfo, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties]):
+def generateGraphs(extraName, clusterInfo, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties]):
     sns.set(font_scale=0.9)
     matplotlib.rcParams.update({'font.size': 10})
 
@@ -214,22 +295,45 @@ def generateGraphs(clusterInfo, values: list[list[PackageInfo]], properties: lis
         for name, propertyName in wantedFeatures:
             for clusterNumber, cluster in clusterInfo.items():
                 t.set_description_str(f"Working on {name}, cluster #{clusterNumber}")
-                generateTheGraph(clusterNumber, cluster, values, properties, name, propertyName)
+                if propertyName == 'statistics':
+                    if len(properties) == 0:
+                        continue
+                    generateScatterPlot(extraName, clusterNumber, cluster, properties, name, propertyName)
+                else:
+                    generateTheGraph(extraName, clusterNumber, cluster, values, properties, name, propertyName)
                 t.update(1)
         t.set_description_str(f"Done generating graphs")
 
 
-def generateTheGraph(clusterNumber, clusters, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties], name, propertyName):
+def generateScatterPlot(extraName, clusterNumber, clusters, properties: list[StatisticalAnalysisProperties], name, propertyName):
     labels = []
     clusterMapData = []
 
     for cluster in clusters:
         labels.append(cluster[1])
         valueIndex = cluster[0]
-        connection = values[valueIndex]
+        clusterMapData.append(properties[valueIndex])
+
+    clusterMapDf = pd.DataFrame(clusterMapData, index=labels, columns=StatisticalAnalysisProperties.__slots__)
+
+    plt.suptitle(f"Exp: {config.expname} | Cluster: {clusterNumber} | Feature: {name}")
+    sns.boxplot(data=clusterMapDf)
+    plt.ylim(-0.1, 1.1)
+    plt.savefig(f'{config.outputDirFigs}/{propertyName}/{extraName}-{clusterNumber}')
+    plt.clf()
+
+
+def generateTheGraph(extraName, clusterNumber, clusters, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties], name, propertyName):
+    labels = []
+    clusterMapData = []
+
+    for cluster in clusters:
+        labels.append(cluster[1])
+        valueIndex = cluster[0]
         if propertyName == 'statistics':
             clusterMapData.append(properties[valueIndex])
         else:
+            connection = values[valueIndex]
             clusterMapData.append([package.__getattribute__(propertyName) for package in connection])
 
     clusterMapDf = pd.DataFrame(clusterMapData, index=labels)
@@ -267,7 +371,7 @@ def generateTheGraph(clusterNumber, clusters, values: list[list[PackageInfo]], p
     else:
         plt.subplots_adjust(top=0.97, bottom=0.02, left=0.2, right=1)
 
-    plt.savefig(config.outputDirFigs + "/" + propertyName + "/" + str(clusterNumber))
+    plt.savefig(f'{config.outputDirFigs}/{propertyName}/{extraName}-{clusterNumber}', transparent=True)
     plt.clf()
 
 
@@ -588,7 +692,7 @@ def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True
 
                     label = labels.pop()
 
-                    if selectedLabelsPerFile[label] >= 200:
+                    if selectedLabelsPerFile[label] >= 50:
                         continue
 
                     key = ConnectionKey(cacheKey, i[0], i[1], window, selection[0].connectionLabel)
@@ -652,7 +756,7 @@ def connectionSummary(connections, selectedLabelsPerFile):
     logging.debug(f"Minimum conn length: {np.min(connectionLengths)}")
     logging.debug(f"Maximum conn length: {np.max(connectionLengths)}")
     if selectedLabelsPerFile:
-        logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'benign: {x[1]}', selectedLabelsPerFile.items())))
+        logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'Benign: {x[1]}', selectedLabelsPerFile.items())))
 
 
 def execute():

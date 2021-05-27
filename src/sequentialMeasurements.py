@@ -1,3 +1,7 @@
+import logging
+import os
+import pickle
+
 import numpy as np
 from numba.core import types
 from numba.typed import Dict, List
@@ -7,13 +11,22 @@ from fastDistances import dtwDistance, ngramDistance
 from models import PackageInfo
 
 
-def getSequentialNormalizedDistanceMeasurement(values):
-    ndmBytes = normalizedByteDistance(values)
-    ndmGaps = normalizedGapsDistance(values)
-    ndmSourcePort = normalizedSourcePortDistance(values)
-    ndmDestinationPort = normalizedDestinationPortDistance(values)
+def getSequentialNormalizedDistanceMeasurement(values, useCache=True):
+    if os.path.exists('data/sequentialDistance.pkl') and useCache:
+        logging.debug("Using cache for sequentialDistance")
+        with open('data/sequentialDistance.pkl', 'rb') as file:
+            ndm = pickle.load(file)
+    else:
+        ndmBytes = normalizedByteDistance(values)
+        ndmGaps = normalizedGapsDistance(values)
+        ndmSourcePort = normalizedSourcePortDistance(values)
+        ndmDestinationPort = normalizedDestinationPortDistance(values)
+        ndm = normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
 
-    return [], normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
+        with open('data/sequentialDistance.pkl', 'wb') as file:
+            pickle.dump(ndm, file)
+
+    return ndm
 
 
 def normalizedDistanceMeasurement(*args):
