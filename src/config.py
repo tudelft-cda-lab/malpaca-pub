@@ -4,7 +4,7 @@ expname = 'exp'
 if len(sys.argv) > 3:
     expname = sys.argv[3]
 
-thresh = 20
+thresh = 50
 if len(sys.argv) > 4:
     thresh = int(sys.argv[4])
 
@@ -14,6 +14,6 @@ outputDirRaw = outputDir + 'raw/'
 outputDirDist = outputDir + 'dist/'
 outputDirFigs = outputDir + 'figs' + addition
 
-minClusterSize = 20
+minClusterSize = 30
 
 useStatistical = True

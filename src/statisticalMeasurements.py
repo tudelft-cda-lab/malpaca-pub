@@ -3,12 +3,12 @@ import os
 import pickle
 
 import numpy as np
+import pandas as pd
 from fastdist import fastdist
 from sklearn.preprocessing import normalize
 
 import config
 from models import PackageInfo, StatisticalAnalysisProperties
-from sequentialMeasurements import normalizedSourcePortDistance, normalizedDestinationPortDistance
 
 smallPacket = range(63, 400 + 1)
 commonPorts = [25, 53, 80, 119, 123, 143, 161, 443, 5353]
@@ -25,10 +25,6 @@ def getStatisticalNormalizedDistanceMeasurement(values, useCache=True):
     else:
         normalizedProperties = getPropertiesFromValues(values)
         ndm = normalizedStatisticalDistance(normalizedProperties)
-        # ndmSourcePort = normalizedSourcePortDistance(values)
-        # ndmDestinationPort = normalizedDestinationPortDistance(values)
-        #
-        # ndm = np.average([ndm, ndmSourcePort, ndmDestinationPort], weights=[len(StatisticalAnalysisProperties.__slots__), 1, 1], axis=0)
 
         with open('data/statisticalDistance.pkl', 'wb') as file:
             pickle.dump(ndm, file)
@@ -39,7 +35,7 @@ def getStatisticalNormalizedDistanceMeasurement(values, useCache=True):
 
 
 def normalizedStatisticalDistance(normalizedProperties):
-    distm = fastdist.matrix_pairwise_distance(normalizedProperties, fastdist.sqeuclidean, "sqeuclidean", return_matrix=True)
+    distm = fastdist.matrix_pairwise_distance(normalizedProperties, fastdist.euclidean, "euclidean", return_matrix=True)
 
     return distm / distm.max()
 
@@ -61,7 +57,7 @@ def getPropertiesFromValues(values: list[list[PackageInfo]]):
 
         TBT = np.sum(pBytes)
         MX = np.max(pBytes)
-        PPS = min(max(0.01, np.sum(pGaps) * uSToS), 1000)
+        PPS = np.sum(pGaps) * uSToS
 
         properties.append(StatisticalAnalysisProperties(
             NSP=np.sum([byte in smallPacket for byte in pBytes], dtype=np.int16),
@@ -73,7 +69,7 @@ def getPropertiesFromValues(values: list[list[PackageInfo]]):
             MX=MX,
             MP=pBytes.count(MX),
             PPS=PPS,
-            BPS=min(max(0.1, TBT / PPS), 10000),
+            BPS=TBT / PPS,
             USP=len(set(sourcePorts)),
             UDP=len(set(destinationPorts)),
             CP=sum([1 if port in commonPorts else 0 for port in sourcePorts]) + sum([1 if port in commonPorts else 0 for port in destinationPorts])
@@ -90,4 +86,7 @@ def getPropertiesFromValues(values: list[list[PackageInfo]]):
         for i, pProperty in enumerate(properties):
             outfile.write(pProperty.__str__() + "\n")
 
-    return normalize(distances, axis=0, norm='max')
+    preClip = pd.DataFrame(distances)
+    clippedDistances = preClip.clip(lower=preClip.quantile(0.025), upper=preClip.quantile(0.975), axis=1)
+
+    return normalize(clippedDistances.to_numpy(), axis=0, norm='max')

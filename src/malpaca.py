@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.manifold import TSNE
+from sklearn.metrics import silhouette_score, silhouette_samples
 from tqdm import tqdm
 
 import config
@@ -32,7 +33,7 @@ from statisticalMeasurements import getStatisticalNormalizedDistanceMeasurement
 
 T = TypeVar('T')
 
-random.seed(42)
+random.seed(45)
 
 numba_logger = logging.getLogger('numba')
 matplotlib_logger = logging.getLogger('matplotlib')
@@ -44,69 +45,7 @@ plt.rcParams.update({'figure.max_open_warning': 0})
 warnings.filterwarnings("ignore", message="Attempting to set identical left == right")
 
 
-def compareFinalClusters(finalClustersSequential, finalClustersStatistical):
-    similarityArray = np.zeros((len(finalClustersSequential), len(finalClustersStatistical)))
-
-    for number, cluster in finalClustersSequential.items():
-        for number2, cluster2 in finalClustersStatistical.items():
-            setOne = set(cluster)
-            setTwo = set(cluster2)
-            similarityArray[number+1][number2+1] = len(setOne & setTwo)
-
-    logging.info('------------------------ Sequential to Statistical')
-
-    maxesColumns = np.argmax(similarityArray, axis=1)
-    for index in range(len(finalClustersSequential)):
-        maxIndex = maxesColumns[index]
-        maxValue = round(similarityArray[index][maxIndex])
-
-        sequentialIndex = index-1
-        statisticalIndex = maxIndex-1
-
-        packetsInSequentialCluster = len(finalClustersSequential[sequentialIndex])
-        packetsInStatisticalCluster = len(finalClustersStatistical[statisticalIndex])
-        totalUnique = packetsInSequentialCluster + packetsInSequentialCluster - maxValue
-
-        if sequentialIndex == -1 and statisticalIndex == -1:
-            logging.info(f'There was an overlap of {round(maxValue/totalUnique * 100, 2)}% of the non-clustered data of {totalUnique} packages')
-        elif statisticalIndex == -1:
-            logging.info(f'{sequentialIndex} (Sequential) containing {packetsInSequentialCluster} packages, was mostly not clustered by Statistical')
-        elif maxValue == packetsInStatisticalCluster:
-            logging.info(f'{statisticalIndex} (Sequential) cluster is fully contained in {sequentialIndex} (Statistical) cluster')
-        elif maxValue == packetsInSequentialCluster:
-            logging.info(f'{sequentialIndex} (Statistical) cluster is fully contained in {statisticalIndex} (Sequential) cluster')
-        else:
-            logging.info(f'Overlap between {sequentialIndex} (Sequential) and {statisticalIndex} (Statistical) is {round(maxValue/totalUnique * 100, 2)}% of {totalUnique} packages')
-
-    logging.info('------------------------ Statistical to Sequential')
-
-    maxesRows = np.argmax(similarityArray, axis=0)
-    for index in range(len(finalClustersStatistical)):
-        maxIndex = maxesRows[index]
-        maxValue = round(similarityArray[maxIndex][index])
-
-        statisticalIndex = index-1
-        sequentialIndex = maxIndex-1
-
-        packetsInStatisticalCluster = len(finalClustersStatistical[statisticalIndex])
-        packetsInSequentialCluster = len(finalClustersSequential[sequentialIndex])
-        totalUnique = packetsInSequentialCluster + packetsInSequentialCluster - maxValue
-
-        if statisticalIndex == -1 and sequentialIndex == -1:
-            logging.info(f'There was an overlap of {round(maxValue/totalUnique * 100, 2)}% of the non-clustered data of {totalUnique} packages')
-        elif sequentialIndex == -1:
-            logging.info(f'{statisticalIndex} (Statistical) containing {packetsInStatisticalCluster} packages, was mostly not clustered by Sequential')
-        elif maxValue == packetsInStatisticalCluster:
-            logging.info(f'{statisticalIndex} (Sequential) cluster is fully contained in {sequentialIndex} (Statistical) cluster')
-        elif maxValue == packetsInSequentialCluster:
-            logging.info(f'{sequentialIndex} (Statistical) cluster is fully contained in {statisticalIndex} (Sequential) cluster')
-        else:
-            logging.info(f'Overlap between {statisticalIndex} (Statistical) and {sequentialIndex} (Sequential) is {round(maxValue/totalUnique * 100, 2)}% of {totalUnique} packages')
-
-    logging.info('------------------------')
-
-
-def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateGraph=True):
+def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateAllGraphs=True):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
     values = list(metadata.values())
@@ -117,20 +56,20 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     sequentialProperties, normalizeDistanceMeasurementStatistical = timeFunction(
         getStatisticalNormalizedDistanceMeasurement.__name__,
-        lambda: getStatisticalNormalizedDistanceMeasurement(values)
+        lambda: getStatisticalNormalizedDistanceMeasurement(values, False)
     )
 
     normalizeDistanceMeasurementSequential = timeFunction(
         getSequentialNormalizedDistanceMeasurement.__name__,
-        lambda: getSequentialNormalizedDistanceMeasurement(values)
+        lambda: getSequentialNormalizedDistanceMeasurement(values, True)
     )
 
     finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical')
     finalClustersSequential, heatmapClusterSequential = processMeasurements(normalizeDistanceMeasurementSequential, mapping, inv_mapping, 'Sequential')
 
-    # compareFinalClusters(finalClustersSequential, finalClustersStatistical)
+    compareFinalClusters(finalClustersSequential, finalClustersStatistical)
 
-    if generateGraph:
+    if generateAllGraphs:
         # clusterAmount = len(finalClusters)
         # generateDag(dagClusters, clusterAmount)
         timeFunction(generateGraphs.__name__, lambda: generateGraphs('Statistical', heatmapClusterStatistical, values, sequentialProperties))
@@ -149,16 +88,6 @@ def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name
     return finalClusters, heatmapCluster
 
 
-def storeRawData(values):
-    for field in fields(PackageInfo):
-        feat = field.name
-        with open(config.outputDirRaw + feat + '-features' + config.addition, 'w') as f:
-            for val in values:
-                vi = [str(x.__getattribute__(feat)) for x in val]
-                f.write(','.join(vi))
-                f.write("\n")
-
-
 def generateOutputFolders():
     if os.path.exists(config.outputDir):
         shutil.rmtree(config.outputDir)
@@ -173,39 +102,17 @@ def generateOutputFolders():
     os.mkdir(config.outputDirFigs + '/statistics')
 
 
-def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey], extraName):
-    csv_file = f'clusters-{extraName}{config.addition}.csv'
-    labels = list(range(len(mapping)))
-
-    final_clusters = {}
-    dagClusters = {}
-    heatmapClusters = {}
-    final_probs = {}
-
-    for lab in set(clu.labels_):
-        occ = [i for i, x in enumerate(clu.labels_) if x == lab]
-        final_probs[lab] = [x for i, x in zip(clu.labels_, clu.probabilities_) if i == lab]
-        final_clusters[lab] = [labels[x] for x in occ]
-
-    with open(config.outputDir + csv_file, 'w') as outfile:
-        outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
-        for n, cluster in final_clusters.items():
-            heatmapClusters[n] = []
-            for idx, connectionKey in enumerate([inv_mapping[x] for x in cluster]):
-                className = connectionKey.name()
-                outfile.write(
-                    f"{n},{mapping[connectionKey]},{final_probs[n][idx]},{className},{connectionKey.filename},{connectionKey.sourceIp},{connectionKey.destinationIp}\n")
-
-                if connectionKey.filename not in dagClusters:
-                    dagClusters[connectionKey.filename] = []
-
-                dagClusters[connectionKey.filename].append((className, n))
-                heatmapClusters[n].append((mapping[connectionKey], className))
-
-    return final_clusters, dagClusters, heatmapClusters
+def storeRawData(values):
+    for field in fields(PackageInfo):
+        feat = field.name
+        with open(config.outputDirRaw + feat + '-features' + config.addition, 'w') as f:
+            for val in values:
+                vi = [str(x.__getattribute__(feat)) for x in val]
+                f.write(','.join(vi))
+                f.write("\n")
 
 
-def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey], normalizeDistanceMeasurement, name):
+def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey], normalizeDistanceMeasurement, extraName):
     cohesions = {}
     separations = {}
     for n, cluster in finalClusters.items():
@@ -241,11 +148,11 @@ def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey], no
         separation = round(separations[n], 4)
 
         if percentage > 0:
-            logging.debug(f"cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}, Cohesion: {cohesion}, Separation: {separation}")
+            logging.debug(f"[{extraName}] Cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
         else:
-            logging.debug(f"cluster {n} does not contain any malicious packages, connections: {len(cluster)}, Cohesion: {cohesion}, Separation: {separation}")
+            logging.debug(f"[{extraName}] Cluster {n} does not contain any malicious packages, connections: {len(cluster)}")
 
-    logging.info(f"{name}: Average cohesion {np.average(list(cohesions.values()))}, Average separation: {np.average(list(separations.values()))}")
+    logging.info(f"[{extraName}] Average cohesion {np.average(list(cohesions.values()))}, Average separation: {np.average(list(separations.values()))}")
 
 
 def labelSummary(connectionKeys: list[ConnectionKey]):
@@ -266,30 +173,69 @@ def labelSummary(connectionKeys: list[ConnectionKey]):
 def generateClusterGraph(clusters, projection, extraName):
     labels = clusters.labels_
 
-    colors = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
-              'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
-              'maroon', 'deepskyblue', 'silver']
-    pal = sns.color_palette(colors)
-    extra_cols = len(set(labels)) - 18
-    pal_extra = sns.color_palette('Paired', extra_cols)
-    pal.extend(pal_extra)
+    # colors = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
+    #           'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
+    #           'maroon', 'deepskyblue', 'silver']
 
+    pal = sns.color_palette("colorblind", n_colors=len(set(labels)))
     col = [pal[x] for x in labels]
 
-    plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.2)
-    for i, txt in enumerate(labels):
-        plt.scatter(projection.T[0][i], projection.T[1][i], color=col[i], alpha=0.6)
-        if txt == -1:
-            continue
+    plt.figure(figsize=(10, 10))
+    # plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.1)
 
-        plt.annotate(txt, (projection.T[0][i], projection.T[1][i]), color=col[i], zorder=100)
+    for i, txt in enumerate(labels):
+
+        alpha = 0.8
+        if txt == -1:
+            alpha = 0.05
+
+        plt.scatter(projection.T[0][i], projection.T[1][i], color=col[i], alpha=alpha, label=txt)
+
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(sorted(zip(labels, handles), key=lambda tuples: int(tuples[0])))
+    plt.legend(by_label.values(), by_label.keys(), title='Clusters', bbox_to_anchor=(1.02, 1), loc='upper left', fontsize='xx-small')
+
+    plt.draw()
     plt.savefig(f'{config.outputDir}clustering-result-{extraName}{config.addition}')
     plt.clf()
+
+
+def saveClustersToCsv(clu, mapping, inv_mapping: dict[int, ConnectionKey], extraName):
+    csv_file = f'clusters-{extraName}{config.addition}.csv'
+    labels = list(range(len(mapping)))
+
+    final_clusters = {}
+    dagClusters = {}
+    heatmapClusters = {}
+    final_probs = {}
+
+    for lab in set(clu.labels_):
+        occ = [i for i, x in enumerate(clu.labels_) if x == lab]
+        final_probs[lab] = [x for i, x in zip(clu.labels_, clu.probabilities_) if i == lab]
+        final_clusters[lab] = [labels[x] for x in occ]
+
+    with open(config.outputDir + csv_file, 'w') as outfile:
+        outfile.write("clusnum,connnum,probability,class,filename,srcip,dstip\n")
+        for n, cluster in final_clusters.items():
+            heatmapClusters[n] = []
+            for idx, connectionKey in enumerate([inv_mapping[x] for x in cluster]):
+                className = connectionKey.name()
+                outfile.write(
+                    f"{n},{mapping[connectionKey]},{final_probs[n][idx]},{className},{connectionKey.filename},{connectionKey.sourceIp},{connectionKey.destinationIp}\n")
+
+                if connectionKey.filename not in dagClusters:
+                    dagClusters[connectionKey.filename] = []
+
+                dagClusters[connectionKey.filename].append((className, n))
+                heatmapClusters[n].append((mapping[connectionKey], className))
+
+    return final_clusters, dagClusters, heatmapClusters
 
 
 def generateClusters(normalizeDistanceMeasurement, extraName):
     RS = 3072018
     projection = TSNE(random_state=RS).fit_transform(normalizeDistanceMeasurement)
+    plt.figure(figsize=(10, 10))
     plt.scatter(*projection.T)
     plt.savefig(f'{config.outputDir}tsne-result-{extraName}{config.addition}')
     plt.clf()
@@ -298,41 +244,24 @@ def generateClusters(normalizeDistanceMeasurement, extraName):
                             metric='precomputed')
     clu = model.fit(normalizeDistanceMeasurement)  # final for citadel and dridex
 
-    logging.info(f"num clusters: {len(set(clu.labels_)) - 1}")
-    avg = 0.0
-    for line in list(set(clu.labels_)):
-        if line != -1:
-            avg += sum([(1 if x == line else 0) for x in clu.labels_])
-    logging.info(f"average size of cluster: {float(avg) / float(len(set(clu.labels_)) - 1)}")
-    logging.info(f"samples in noise: {sum([(1 if x == -1 else 0) for x in clu.labels_])}")
+    silhouetteScores = silhouette_samples(normalizeDistanceMeasurement, clu.labels_, metric='precomputed')
+    logging.info(f"[{extraName}] Number of clusters: {len(set(clu.labels_)) - 1}")
+
+    avgClusterSize = 0
+    avgSilhoutteScore = 0
+    for clusterNumber in list(set(clu.labels_)):
+        if clusterNumber == -1:
+            continue
+        scoresForSpecificCluster = silhouetteScores[clu.labels_ == clusterNumber]
+        silhouetteAverageForCluster = np.average(scoresForSpecificCluster)
+        avgSilhoutteScore += silhouetteAverageForCluster
+        avgClusterSize += np.count_nonzero(clu.labels_ == clusterNumber)
+        logging.info(f'[{extraName}] silhouette score for cluster {clusterNumber}, size {len(scoresForSpecificCluster)} is {silhouetteAverageForCluster}')
+
+    logging.info(f"[{extraName}] Average size of cluster: {avgClusterSize / len(set(clu.labels_)) - 1}")
+    logging.info(f"[{extraName}] Samples in noise: {np.count_nonzero(clu.labels_ == -1)}")
 
     return clu, projection
-
-
-def generateGraphs(extraName, clusterInfo, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties]):
-    sns.set(font_scale=0.9)
-    matplotlib.rcParams.update({'font.size': 10})
-
-    wantedFeatures = [
-        # ("Packet sizes", PackageInfo.bytes.__name__),
-        # ("Interval", PackageInfo.gap.__name__),
-        # ("Source Port", PackageInfo.sourcePort.__name__),
-        # ("Dest. Port", PackageInfo.destinationPort.__name__),
-        ("Statistics", "statistics")
-    ]
-
-    with tqdm(total=(len(wantedFeatures) * len(clusterInfo)), unit='graphs') as t:
-        for name, propertyName in wantedFeatures:
-            for clusterNumber, cluster in clusterInfo.items():
-                t.set_description_str(f"Working on {name}, cluster #{clusterNumber}")
-                if propertyName == 'statistics':
-                    if len(properties) == 0:
-                        continue
-                    generateScatterPlot(extraName, clusterNumber, cluster, properties, name, propertyName)
-                else:
-                    generateTheGraph(extraName, clusterNumber, cluster, values, properties, name, propertyName)
-                t.update(1)
-        t.set_description_str(f"Done generating graphs")
 
 
 def generateScatterPlot(extraName, clusterNumber, clusters, properties: list[StatisticalAnalysisProperties], name, propertyName):
@@ -346,14 +275,43 @@ def generateScatterPlot(extraName, clusterNumber, clusters, properties: list[Sta
 
     clusterMapDf = pd.DataFrame(clusterMapData, index=labels, columns=StatisticalAnalysisProperties.__slots__)
 
+    plt.figure(figsize=(10, 10))
     plt.suptitle(f"Exp: {config.expname} | Cluster: {clusterNumber} | Feature: {name}")
     sns.boxplot(data=clusterMapDf)
     plt.ylim(-0.1, 1.1)
+    plt.draw()
     plt.savefig(f'{config.outputDirFigs}/{propertyName}/{extraName}-{clusterNumber}')
     plt.clf()
 
 
-def generateTheGraph(extraName, clusterNumber, clusters, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties], name, propertyName):
+def generateGraphs(extraName, clusterInfo, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties]):
+    sns.set(font_scale=0.9)
+    matplotlib.rcParams.update({'font.size': 10})
+
+    wantedFeatures = [
+        # ("Packet sizes", PackageInfo.bytes.__name__),
+        # ("Interval", PackageInfo.gap.__name__),
+        # ("Source Port", PackageInfo.sourcePort.__name__),
+        ("Dest. Port", PackageInfo.destinationPort.__name__),
+        ("Statistics", "statistics")
+    ]
+
+    with tqdm(total=(len(wantedFeatures) * len(clusterInfo)), unit='graphs') as t:
+        for name, propertyName in wantedFeatures:
+            for clusterNumber, cluster in clusterInfo.items():
+                t.set_description_str(f"Working on {name}, cluster #{clusterNumber}")
+                if propertyName == 'statistics':
+                    if len(properties) == 0:
+                        t.update(1)
+                        continue
+                    generateScatterPlot(extraName, clusterNumber, cluster, properties, name, propertyName)
+                else:
+                    generateGraph(extraName, clusterNumber, cluster, values, properties, name, propertyName)
+                t.update(1)
+        t.set_description_str(f"Done generating graphs")
+
+
+def generateGraph(extraName, clusterNumber, clusters, values: list[list[PackageInfo]], properties: list[StatisticalAnalysisProperties], name, propertyName):
     labels = []
     clusterMapData = []
 
@@ -377,11 +335,11 @@ def generateTheGraph(extraName, clusterNumber, clusters, values: list[list[Packa
         heatmapData.append(clusterMapData[it])
 
     if len(clusters) <= 50:
-        plt.figure(figsize=(15.0, 9.0))
+        fig = plt.figure(figsize=(15.0, 9.0))
     elif len(clusters) <= 100:
-        plt.figure(figsize=(15.0, 18.0))
+        fig = plt.figure(figsize=(15.0, 18.0))
     else:
-        plt.figure(figsize=(20.0, 27.0))
+        fig = plt.figure(figsize=(20.0, 27.0))
 
     plt.suptitle(f"Exp: {config.expname} | Cluster: {clusterNumber} | Feature: {name}")
 
@@ -395,12 +353,13 @@ def generateTheGraph(extraName, clusterNumber, clusters, values: list[list[Packa
     plt.setp(heatmap.get_yticklabels(), rotation=0)
 
     if len(clusters) <= 50:
-        plt.subplots_adjust(top=0.93, bottom=0.06, left=0.25, right=1.05)
+        fig.subplots_adjust(top=0.93, bottom=0.06, left=0.25, right=1.05)
     elif len(clusters) <= 100:
-        plt.subplots_adjust(top=0.95, bottom=0.04, left=0.225, right=1.025)
+        fig.subplots_adjust(top=0.95, bottom=0.04, left=0.225, right=1.025)
     else:
-        plt.subplots_adjust(top=0.97, bottom=0.02, left=0.2, right=1)
+        fig.subplots_adjust(top=0.97, bottom=0.02, left=0.2, right=1)
 
+    plt.draw()
     plt.savefig(f'{config.outputDirFigs}/{propertyName}/{extraName}-{clusterNumber}', transparent=True)
     plt.clf()
 
@@ -536,46 +495,158 @@ def difference(str1, str2):
     return sum([str1[x] != str2[x] for x in range(len(str1))])
 
 
-def inet_to_str(inet: bytes) -> str:
-    try:
-        return socket.inet_ntop(socket.AF_INET, inet)
-    except ValueError:
-        return socket.inet_ntop(socket.AF_INET6, inet)
+def compareFinalClusters(finalClustersSequential, finalClustersStatistical):
+    similarityArray = np.zeros((len(finalClustersSequential), len(finalClustersStatistical)))
+
+    for number, cluster in finalClustersSequential.items():
+        for number2, cluster2 in finalClustersStatistical.items():
+            setOne = set(cluster)
+            setTwo = set(cluster2)
+            similarityArray[number+1][number2+1] = len(setOne & setTwo)
+
+    logging.info('------------------------ Sequential to Statistical')
+
+    maxesColumns = np.argmax(similarityArray, axis=1)
+    for index in range(len(finalClustersSequential)):
+        maxIndex = maxesColumns[index]
+        maxValue = round(similarityArray[index][maxIndex])
+
+        sequentialIndex = index-1
+        statisticalIndex = maxIndex-1
+
+        packetsInSequentialCluster = len(finalClustersSequential[sequentialIndex])
+        packetsInStatisticalCluster = len(finalClustersStatistical[statisticalIndex])
+        totalUnique = packetsInSequentialCluster + packetsInSequentialCluster - maxValue
+
+        if sequentialIndex == -1 and statisticalIndex == -1:
+            logging.info(f'There was an overlap of {round(maxValue/totalUnique * 100, 2)}% of the non-clustered data of {totalUnique} packages')
+        elif statisticalIndex == -1:
+            logging.info(f'{sequentialIndex} (Sequential) containing {packetsInSequentialCluster} packages, was mostly not clustered by Statistical')
+        elif maxValue == packetsInStatisticalCluster:
+            logging.info(f'{statisticalIndex} (Sequential) cluster is fully contained in {sequentialIndex} (Statistical) cluster')
+        elif maxValue == packetsInSequentialCluster:
+            logging.info(f'{sequentialIndex} (Statistical) cluster is fully contained in {statisticalIndex} (Sequential) cluster')
+        else:
+            logging.info(f'Overlap between {sequentialIndex} (Sequential) and {statisticalIndex} (Statistical) is {round(maxValue/totalUnique * 100, 2)}% of {totalUnique} packages')
+
+    logging.info('------------------------ Statistical to Sequential')
+
+    maxesRows = np.argmax(similarityArray, axis=0)
+    for index in range(len(finalClustersStatistical)):
+        maxIndex = maxesRows[index]
+        maxValue = round(similarityArray[maxIndex][index])
+
+        statisticalIndex = index-1
+        sequentialIndex = maxIndex-1
+
+        packetsInStatisticalCluster = len(finalClustersStatistical[statisticalIndex])
+        packetsInSequentialCluster = len(finalClustersSequential[sequentialIndex])
+        totalUnique = packetsInSequentialCluster + packetsInSequentialCluster - maxValue
+
+        if statisticalIndex == -1 and sequentialIndex == -1:
+            logging.info(f'There was an overlap of {round(maxValue/totalUnique * 100, 2)}% of the non-clustered data of {totalUnique} packages')
+        elif sequentialIndex == -1:
+            logging.info(f'{statisticalIndex} (Statistical) containing {packetsInStatisticalCluster} packages, was mostly not clustered by Sequential')
+        elif maxValue == packetsInStatisticalCluster:
+            logging.info(f'{statisticalIndex} (Sequential) cluster is fully contained in {sequentialIndex} (Statistical) cluster')
+        elif maxValue == packetsInSequentialCluster:
+            logging.info(f'{sequentialIndex} (Statistical) cluster is fully contained in {statisticalIndex} (Sequential) cluster')
+        else:
+            logging.info(f'Overlap between {statisticalIndex} (Statistical) and {sequentialIndex} (Sequential) is {round(maxValue/totalUnique * 100, 2)}% of {totalUnique} packages')
+
+    logging.info('------------------------')
 
 
-def readLabeled(filename) -> (dict[int, str], int):
-    labelsFilename = filename.replace("pcap", "labeled")
-    if not os.path.exists(labelsFilename):
-        logging.info(f"Label file for {filename} doesn't exist")
-        return {}, 0
+def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True):
+    meta = {}
+    mapping = {}
+    totalLabels = defaultdict(int)
+    mappingIndex = 0
+    if forceFileCacheUse:
+        files = glob.glob(sys.argv[2] + "/*.pcap.pkl")
+    else:
+        files = glob.glob(sys.argv[2] + "/**/*.pcap")
+    logging.info(f'About to read pcap... from {len(files)} files')
 
-    connectionLabels = {}
+    if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and os.path.exists('data/totalLabels.pkl') and useCache:
+        with open('data/meta.pkl', 'rb') as file:
+            meta = pickle.load(file)
+        with open('data/mapping.pkl', 'rb') as file:
+            mapping = pickle.load(file)
+        with open('data/totalLabels.pkl', 'rb') as file:
+            totalLabels = pickle.load(file)
+    else:
+        for f in files:
+            cacheKey = os.path.basename(f)
+            cacheName = f'data/{cacheKey}.pkl'
+            if os.path.exists(cacheName) and useFileCache:
+                logging.debug(f'Using cache: {cacheKey}')
+                with open(cacheName, 'rb') as file:
+                    connections = pickle.load(file)
+            elif os.path.exists(f) and forceFileCacheUse:
+                logging.debug(f'Using cache: {cacheKey}')
+                with open(f, 'rb') as file:
+                    connections = pickle.load(file)
+            elif not forceFileCacheUse:
+                logging.info(f'Reading file: {cacheKey}')
+                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f))
 
-    line_count = 0
-    with open(labelsFilename, 'r') as f:
-        for _ in f:
-            line_count += 1
+                if len(connections.items()) < 1:
+                    continue
 
-    with open(labelsFilename, 'r') as f:
-        for line in tqdm(f, total=line_count, unit='lines', unit_scale=True, postfix=labelsFilename, mininterval=0.5):
-            labelFields = line.split("\x09")
-
-            if len(labelFields) != 21:
+                with open(cacheName, 'wb') as file:
+                    pickle.dump(connections, file)
+            else:
+                logging.info(f'Skipping {f} because it has no cache file: {cacheName}')
                 continue
 
-            sourceIp = labelFields[2]
-            sourcePort = int(labelFields[3])
-            destIp = labelFields[4]
-            destPort = int(labelFields[5])
-            labeling = labelFields[20].strip().split("   ")
+            connectionItems: list[(ConnectionKey, list[PackageInfo])] = list(connections.items())
+            random.shuffle(connectionItems)
+            selectedLabelsPerFile = defaultdict(int)
 
-            key = hash((sourceIp, destIp, sourcePort, destPort))
+            for i, v in connectionItems:
+                wantedWindow = getWantedWindow(v)
 
-            connectionLabels[key] = labeling[2]
+                for window in wantedWindow:
+                    selection: list[PackageInfo] = v[config.thresh * window:config.thresh * (window + 1)]
+                    labels = set()
+                    for package in selection:
+                        labels.add(package.connectionLabel)
 
-    logging.info(f'Done reading {len(connectionLabels)} labels...')
+                    if len(labels) != 1:
+                        continue
 
-    return connectionLabels, line_count
+                    label = labels.pop()
+
+                    if selectedLabelsPerFile[label] >= 200:
+                        continue
+
+                    key = ConnectionKey(cacheKey, i[0], i[1], window, selection[0].connectionLabel)
+
+                    selectedLabelsPerFile[label] += 1
+                    mapping[key] = mappingIndex
+                    mappingIndex += 1
+                    meta[key] = selection
+
+            # connectionSummary(connections, selectedLabelsPerFile)
+            for k, v in selectedLabelsPerFile.items():
+                totalLabels[k] += v
+
+        with open('data/meta.pkl', 'wb') as file:
+            pickle.dump(meta, file)
+        with open('data/mapping.pkl', 'wb') as file:
+            pickle.dump(mapping, file)
+        with open('data/totalLabels.pkl', 'wb') as file:
+            pickle.dump(totalLabels, file)
+
+    logging.info(f'Collective surviving connections {len(meta)}')
+    connectionSummary(meta, totalLabels)
+
+    if len(meta) < 50:
+        logging.error('Too little connections to create clustering')
+        raise Exception
+
+    return meta, mapping
 
 
 def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
@@ -661,96 +732,46 @@ def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
     return {key: value for (key, value) in connections.items() if len(value) >= config.thresh}
 
 
-def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True):
-    meta = {}
-    mapping = {}
-    totalLabels = defaultdict(int)
-    mappingIndex = 0
-    if forceFileCacheUse:
-        files = glob.glob(sys.argv[2] + "/*.pcap.pkl")
-    else:
-        files = glob.glob(sys.argv[2] + "/**/*.pcap")
-    logging.info(f'About to read pcap... from {len(files)} files')
+def readLabeled(filename) -> (dict[int, str], int):
+    labelsFilename = filename.replace("pcap", "labeled")
+    if not os.path.exists(labelsFilename):
+        logging.info(f"Label file for {filename} doesn't exist")
+        return {}, 0
 
-    if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and os.path.exists('data/totalLabels.pkl') and useCache:
-        with open('data/meta.pkl', 'rb') as file:
-            meta = pickle.load(file)
-        with open('data/mapping.pkl', 'rb') as file:
-            mapping = pickle.load(file)
-        with open('data/totalLabels.pkl', 'rb') as file:
-            totalLabels = pickle.load(file)
-    else:
-        for f in files:
-            cacheKey = os.path.basename(f)
-            cacheName = f'data/{cacheKey}.pkl'
-            if os.path.exists(cacheName) and useFileCache:
-                logging.debug(f'Using cache: {cacheKey}')
-                with open(cacheName, 'rb') as file:
-                    connections = pickle.load(file)
-            elif os.path.exists(f) and forceFileCacheUse:
-                logging.debug(f'Using cache: {cacheKey}')
-                with open(f, 'rb') as file:
-                    connections = pickle.load(file)
-            elif not forceFileCacheUse:
-                logging.info(f'Reading file: {cacheKey}')
-                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f))
+    connectionLabels = {}
 
-                if len(connections.items()) < 1:
-                    continue
+    line_count = 0
+    with open(labelsFilename, 'r') as f:
+        for _ in f:
+            line_count += 1
 
-                with open(cacheName, 'wb') as file:
-                    pickle.dump(connections, file)
-            else:
-                logging.info(f'Skipping {f} because it has no cache file: {cacheName}')
+    with open(labelsFilename, 'r') as f:
+        for line in tqdm(f, total=line_count, unit='lines', unit_scale=True, postfix=labelsFilename, mininterval=0.5):
+            labelFields = line.split("\x09")
+
+            if len(labelFields) != 21:
                 continue
 
-            connectionItems: list[(ConnectionKey, list[PackageInfo])] = list(connections.items())
-            random.shuffle(connectionItems)
-            selectedLabelsPerFile = defaultdict(int)
+            sourceIp = labelFields[2]
+            sourcePort = int(labelFields[3])
+            destIp = labelFields[4]
+            destPort = int(labelFields[5])
+            labeling = labelFields[20].strip().split("   ")
 
-            for i, v in connectionItems:
-                wantedWindow = getWantedWindow(v)
+            key = hash((sourceIp, destIp, sourcePort, destPort))
 
-                for window in wantedWindow:
-                    selection: list[PackageInfo] = v[config.thresh * window:config.thresh * (window + 1)]
-                    labels = set()
-                    for package in selection:
-                        labels.add(package.connectionLabel)
+            connectionLabels[key] = labeling[2]
 
-                    if len(labels) != 1:
-                        continue
+    logging.info(f'Done reading {len(connectionLabels)} labels...')
 
-                    label = labels.pop()
+    return connectionLabels, line_count
 
-                    if selectedLabelsPerFile[label] >= 50:
-                        continue
 
-                    key = ConnectionKey(cacheKey, i[0], i[1], window, selection[0].connectionLabel)
-
-                    selectedLabelsPerFile[label] += 1
-                    mapping[key] = mappingIndex
-                    mappingIndex += 1
-                    meta[key] = selection
-
-            # connectionSummary(connections, selectedLabelsPerFile)
-            for k, v in selectedLabelsPerFile.items():
-                totalLabels[k] += v
-
-        with open('data/meta.pkl', 'wb') as file:
-            pickle.dump(meta, file)
-        with open('data/mapping.pkl', 'wb') as file:
-            pickle.dump(mapping, file)
-        with open('data/totalLabels.pkl', 'wb') as file:
-            pickle.dump(totalLabels, file)
-
-    logging.info(f'Collective surviving connections {len(meta)}')
-    connectionSummary(meta, totalLabels)
-
-    if len(meta) < 50:
-        logging.error('Too little connections to create clustering')
-        raise Exception
-
-    return meta, mapping
+def inet_to_str(inet: bytes) -> str:
+    try:
+        return socket.inet_ntop(socket.AF_INET, inet)
+    except ValueError:
+        return socket.inet_ntop(socket.AF_INET6, inet)
 
 
 def getWantedWindow(v):
