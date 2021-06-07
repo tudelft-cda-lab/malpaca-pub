@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.manifold import TSNE
-from sklearn.metrics import silhouette_score, silhouette_samples
+from sklearn.metrics import silhouette_samples
 from tqdm import tqdm
 
 import config
@@ -61,7 +61,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     normalizeDistanceMeasurementSequential = timeFunction(
         getSequentialNormalizedDistanceMeasurement.__name__,
-        lambda: getSequentialNormalizedDistanceMeasurement(values, True)
+        lambda: getSequentialNormalizedDistanceMeasurement(values, False)
     )
 
     finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical')
@@ -240,12 +240,13 @@ def generateClusters(normalizeDistanceMeasurement, extraName):
     plt.savefig(f'{config.outputDir}tsne-result-{extraName}{config.addition}')
     plt.clf()
 
-    model = hdbscan.HDBSCAN(min_cluster_size=config.minClusterSize, min_samples=config.minClusterSize, cluster_selection_method='leaf',
+    clusterSize = len(normalizeDistanceMeasurement) // 100
+    model = hdbscan.HDBSCAN(min_cluster_size=clusterSize, min_samples=clusterSize, cluster_selection_method='leaf',
                             metric='precomputed')
     clu = model.fit(normalizeDistanceMeasurement)  # final for citadel and dridex
 
     silhouetteScores = silhouette_samples(normalizeDistanceMeasurement, clu.labels_, metric='precomputed')
-    logging.info(f"[{extraName}] Number of clusters: {len(set(clu.labels_)) - 1}")
+    logging.info(f"[{extraName}] Number of clusters: {len(set(clu.labels_)) - 1}, clusterSize: {clusterSize}")
 
     avgClusterSize = 0
     avgSilhoutteScore = 0
@@ -258,7 +259,10 @@ def generateClusters(normalizeDistanceMeasurement, extraName):
         avgClusterSize += np.count_nonzero(clu.labels_ == clusterNumber)
         logging.info(f'[{extraName}] silhouette score for cluster {clusterNumber}, size {len(scoresForSpecificCluster)} is {silhouetteAverageForCluster}')
 
-    logging.info(f"[{extraName}] Average size of cluster: {avgClusterSize / len(set(clu.labels_)) - 1}")
+    amountOfClusters = len(set(clu.labels_)) - 1
+
+    logging.info(f"[{extraName}] Average size of cluster: {avgClusterSize / amountOfClusters}")
+    logging.info(f"[{extraName}] Average silhouette Score of cluster: {avgSilhoutteScore / amountOfClusters}")
     logging.info(f"[{extraName}] Samples in noise: {np.count_nonzero(clu.labels_ == -1)}")
 
     return clu, projection
@@ -289,9 +293,9 @@ def generateGraphs(extraName, clusterInfo, values: list[list[PackageInfo]], prop
     matplotlib.rcParams.update({'font.size': 10})
 
     wantedFeatures = [
-        # ("Packet sizes", PackageInfo.bytes.__name__),
-        # ("Interval", PackageInfo.gap.__name__),
-        # ("Source Port", PackageInfo.sourcePort.__name__),
+        ("Packet sizes", PackageInfo.bytes.__name__),
+        ("Interval", PackageInfo.gap.__name__),
+        ("Source Port", PackageInfo.sourcePort.__name__),
         ("Dest. Port", PackageInfo.destinationPort.__name__),
         ("Statistics", "statistics")
     ]
@@ -557,7 +561,7 @@ def compareFinalClusters(finalClustersSequential, finalClustersStatistical):
     logging.info('------------------------')
 
 
-def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True):
+def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=True):
     meta = {}
     mapping = {}
     totalLabels = defaultdict(int)
@@ -807,7 +811,7 @@ def connectionSummary(connections, selectedLabelsPerFile):
     logging.debug(f"Minimum conn length: {np.min(connectionLengths)}")
     logging.debug(f"Maximum conn length: {np.max(connectionLengths)}")
     if selectedLabelsPerFile:
-        logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'Benign: {x[1]}', selectedLabelsPerFile.items())))
+        logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'Benign: {x[1]}', sorted(selectedLabelsPerFile.items()))))
 
 
 def execute():
