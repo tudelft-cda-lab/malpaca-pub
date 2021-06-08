@@ -12,4 +12,5 @@ addition = '-' + expname + '-' + str(thresh)
 outputDir = 'output/'  # All files in this folder will be deleted
 outputDirRaw = outputDir + 'raw/'
 outputDirDist = outputDir + 'dist/'
+outputDirStats = 'stats/'
 outputDirFigs = outputDir + 'figs' + addition

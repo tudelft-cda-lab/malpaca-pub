@@ -45,7 +45,7 @@ plt.rcParams.update({'figure.max_open_warning': 0})
 warnings.filterwarnings("ignore", message="Attempting to set identical left == right")
 
 
-def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateAllGraphs=True):
+def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateAllGraphs=False):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
     values = list(metadata.values())
@@ -56,18 +56,18 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     sequentialProperties, normalizeDistanceMeasurementStatistical = timeFunction(
         getStatisticalNormalizedDistanceMeasurement.__name__,
-        lambda: getStatisticalNormalizedDistanceMeasurement(values, False)
+        lambda: getStatisticalNormalizedDistanceMeasurement(values, True)
     )
 
     normalizeDistanceMeasurementSequential = timeFunction(
         getSequentialNormalizedDistanceMeasurement.__name__,
-        lambda: getSequentialNormalizedDistanceMeasurement(values, False)
+        lambda: getSequentialNormalizedDistanceMeasurement(values, True)
     )
 
     finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical')
     finalClustersSequential, heatmapClusterSequential = processMeasurements(normalizeDistanceMeasurementSequential, mapping, inv_mapping, 'Sequential')
 
-    compareFinalClusters(finalClustersSequential, finalClustersStatistical)
+    # compareFinalClusters(finalClustersSequential, finalClustersStatistical)
 
     if generateAllGraphs:
         # clusterAmount = len(finalClusters)
@@ -77,13 +77,16 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
 
 def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name):
+    if os.path.exists(f"{config.outputDirStats}{name}{config.addition}.txt"):
+        os.remove(f"{config.outputDirStats}{name}{config.addition}.txt")
+
     clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement, name))
 
     timeFunction(generateClusterGraph.__name__, lambda: generateClusterGraph(clu, projection, name))
 
     finalClusters, dagClusters, heatmapCluster = saveClustersToCsv(clu, mapping, inv_mapping, name)
 
-    finalClusterSummary(finalClusters, inv_mapping, normalizeDistanceMeasurement, name)
+    finalClusterSummary(finalClusters, inv_mapping, name)
 
     return finalClusters, heatmapCluster
 
@@ -112,27 +115,9 @@ def storeRawData(values):
                 f.write("\n")
 
 
-def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey], normalizeDistanceMeasurement, extraName):
-    cohesions = {}
-    separations = {}
-    for n, cluster in finalClusters.items():
-        if n == -1:
-            continue
-
-        clusterDistances = normalizeDistanceMeasurement[cluster]
-        meanDistances = np.average(clusterDistances[:, cluster])
-        cohesions[n] = meanDistances
-
-        smallestDistance = sys.maxsize
-        for n2, cluster2 in finalClusters.items():
-            if n == n2 or n2 == -1:
-                continue
-
-            meanDistanceToCluster = np.average(clusterDistances[:, cluster2])
-            if meanDistanceToCluster < smallestDistance:
-                smallestDistance = meanDistanceToCluster
-
-        separations[n] = smallestDistance
+def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey], extraName):
+    averageClusterPurity = []
+    averageClusterMaliciousPurity = []
 
     for n, cluster in finalClusters.items():
         if n == -1:
@@ -144,15 +129,35 @@ def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey], no
 
         summary = labelSummary(connectionKeys)
         percentage = summary['percentage']
-        cohesion = round(cohesions[n], 4)
-        separation = round(separations[n], 4)
 
         if percentage > 0:
-            logging.debug(f"[{extraName}] Cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}")
+            clusterPurity = abs(percentage - 50) / 50
+            averageClusterPurity.append(clusterPurity)
+
+            if percentage > 60:
+                averageClusterMaliciousPurity.append(calculateMaliciousPurity(connectionKeys, summary))
+
+            logging.debug(f"[{extraName}] Cluster {n} is {round(percentage, 2)}% malicious, contains following labels: {','.join(summary['labels'])}, connections: {len(cluster)}, clusterPurity: {clusterPurity}")
         else:
+            averageClusterPurity.append(1)
             logging.debug(f"[{extraName}] Cluster {n} does not contain any malicious packages, connections: {len(cluster)}")
 
-    logging.info(f"[{extraName}] Average cohesion {np.average(list(cohesions.values()))}, Average separation: {np.average(list(separations.values()))}")
+    logging.debug(averageClusterPurity)
+    logging.debug(averageClusterMaliciousPurity)
+
+    appendStatsToOutputFile(extraName, "Cluster purity", round(np.average(averageClusterPurity), 3))
+    appendStatsToOutputFile(extraName, "Cluster malicious purity", round(np.average(averageClusterMaliciousPurity), 3))
+
+
+def calculateMaliciousPurity(connectionKeys, summary):
+    sumOfMaliciousItems = 0
+    labelCount = {}
+    for key in summary['labels']:
+        maliciousConnections = sum(1 if clusterKey.connectionLabel == key else 0 for clusterKey in connectionKeys)
+        sumOfMaliciousItems += maliciousConnections
+        labelCount[key] = maliciousConnections
+    labelWithMaxCount = max(labelCount, key=labelCount.get)
+    return labelCount[labelWithMaxCount] / sumOfMaliciousItems
 
 
 def labelSummary(connectionKeys: list[ConnectionKey]):
@@ -173,18 +178,12 @@ def labelSummary(connectionKeys: list[ConnectionKey]):
 def generateClusterGraph(clusters, projection, extraName):
     labels = clusters.labels_
 
-    # colors = ['royalblue', 'red', 'darksalmon', 'sienna', 'mediumpurple', 'palevioletred', 'plum', 'darkgreen',
-    #           'lightseagreen', 'mediumvioletred', 'gold', 'navy', 'sandybrown', 'darkorchid', 'olivedrab', 'rosybrown',
-    #           'maroon', 'deepskyblue', 'silver']
-
     pal = sns.color_palette("colorblind", n_colors=len(set(labels)))
     col = [pal[x] for x in labels]
 
     plt.figure(figsize=(10, 10))
-    # plt.scatter(*projection.T, s=50, linewidth=0, c=col, alpha=0.1)
 
     for i, txt in enumerate(labels):
-
         alpha = 0.8
         if txt == -1:
             alpha = 0.05
@@ -240,13 +239,15 @@ def generateClusters(normalizeDistanceMeasurement, extraName):
     plt.savefig(f'{config.outputDir}tsne-result-{extraName}{config.addition}')
     plt.clf()
 
-    clusterSize = len(normalizeDistanceMeasurement) // 100
+    clusterSize = len(normalizeDistanceMeasurement) // 150
     model = hdbscan.HDBSCAN(min_cluster_size=clusterSize, min_samples=clusterSize, cluster_selection_method='leaf',
                             metric='precomputed')
-    clu = model.fit(normalizeDistanceMeasurement)  # final for citadel and dridex
+    clu = model.fit(normalizeDistanceMeasurement)
+
+    amountOfClusters = len(set(clu.labels_)) - 1
 
     silhouetteScores = silhouette_samples(normalizeDistanceMeasurement, clu.labels_, metric='precomputed')
-    logging.info(f"[{extraName}] Number of clusters: {len(set(clu.labels_)) - 1}, clusterSize: {clusterSize}")
+    logging.info(f"[{extraName}] Number of clusters: {amountOfClusters}, clusterSize: {clusterSize}")
 
     avgClusterSize = 0
     avgSilhoutteScore = 0
@@ -257,13 +258,17 @@ def generateClusters(normalizeDistanceMeasurement, extraName):
         silhouetteAverageForCluster = np.average(scoresForSpecificCluster)
         avgSilhoutteScore += silhouetteAverageForCluster
         avgClusterSize += np.count_nonzero(clu.labels_ == clusterNumber)
-        logging.info(f'[{extraName}] silhouette score for cluster {clusterNumber}, size {len(scoresForSpecificCluster)} is {silhouetteAverageForCluster}')
-
-    amountOfClusters = len(set(clu.labels_)) - 1
+        # logging.info(f'[{extraName}] silhouette score for cluster {clusterNumber}, size {len(scoresForSpecificCluster)} is {silhouetteAverageForCluster}')
 
     logging.info(f"[{extraName}] Average size of cluster: {avgClusterSize / amountOfClusters}")
     logging.info(f"[{extraName}] Average silhouette Score of cluster: {avgSilhoutteScore / amountOfClusters}")
     logging.info(f"[{extraName}] Samples in noise: {np.count_nonzero(clu.labels_ == -1)}")
+
+    appendStatsToOutputFile(extraName, "Number of clusters", amountOfClusters)
+    appendStatsToOutputFile(extraName, "Clustering size", clusterSize)
+    appendStatsToOutputFile(extraName, "Average cluster size", round(avgClusterSize/amountOfClusters, 2))
+    appendStatsToOutputFile(extraName, "Average silhoutte score", round(avgSilhoutteScore/amountOfClusters, 3))
+    appendStatsToOutputFile(extraName, "Samples in noise", round(np.count_nonzero(clu.labels_ == -1) / len(normalizeDistanceMeasurement) * 100, 2))
 
     return clu, projection
 
@@ -490,7 +495,7 @@ def generateDag(dagClusters, clusterAmount):
     logging.info('Rendering DAG -- using graphviz dot')
     try:
         os.system(f'dot -Tpng {config.outputDir}relation-tree{config.addition}.dot -o {config.outputDir}DAG{config.addition}.png')
-    except:
+    except Exception:
         pass
 
 
@@ -561,7 +566,7 @@ def compareFinalClusters(finalClustersSequential, finalClustersStatistical):
     logging.info('------------------------')
 
 
-def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=True):
+def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True):
     meta = {}
     mapping = {}
     totalLabels = defaultdict(int)
@@ -662,7 +667,7 @@ def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
         for ts, pkt in tqdm(pcap, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
             try:
                 eth = dpkt.ethernet.Ethernet(pkt)
-            except:
+            except Exception:
                 continue
 
             level3 = eth.data
@@ -811,7 +816,18 @@ def connectionSummary(connections, selectedLabelsPerFile):
     logging.debug(f"Minimum conn length: {np.min(connectionLengths)}")
     logging.debug(f"Maximum conn length: {np.max(connectionLengths)}")
     if selectedLabelsPerFile:
+        with open(f"{config.outputDirStats}Labels{config.addition}.txt", 'w') as f:
+            for label in sorted(selectedLabelsPerFile.items()):
+                name = label[0].replace('&', '\&')
+                if label[0] == '-':
+                    name = 'Benign'
+                f.write(f"{name} | {label[1]}\n")
         logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'Benign: {x[1]}', sorted(selectedLabelsPerFile.items()))))
+
+
+def appendStatsToOutputFile(extraName, stat, value):
+    with open(f"{config.outputDirStats}{extraName}{config.addition}.txt", 'a') as f:
+        f.write(f"{stat} : {value}\n")
 
 
 def execute():
