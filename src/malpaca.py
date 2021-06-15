@@ -56,16 +56,16 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     sequentialProperties, normalizeDistanceMeasurementStatistical = timeFunction(
         getStatisticalNormalizedDistanceMeasurement.__name__,
-        lambda: getStatisticalNormalizedDistanceMeasurement(values, True)
+        lambda: getStatisticalNormalizedDistanceMeasurement(values, False)
     )
 
     normalizeDistanceMeasurementSequential = timeFunction(
         getSequentialNormalizedDistanceMeasurement.__name__,
-        lambda: getSequentialNormalizedDistanceMeasurement(values, True)
+        lambda: getSequentialNormalizedDistanceMeasurement(values, False)
     )
 
-    finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical')
-    finalClustersSequential, heatmapClusterSequential = processMeasurements(normalizeDistanceMeasurementSequential, mapping, inv_mapping, 'Sequential')
+    finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical', generateAllGraphs)
+    finalClustersSequential, heatmapClusterSequential = processMeasurements(normalizeDistanceMeasurementSequential, mapping, inv_mapping, 'Sequential', generateAllGraphs)
 
     # compareFinalClusters(finalClustersSequential, finalClustersStatistical)
 
@@ -76,13 +76,14 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
         timeFunction(generateGraphs.__name__, lambda: generateGraphs('Sequential', heatmapClusterSequential, values, []))
 
 
-def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name):
+def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name, generateAllGraphs):
     if os.path.exists(f"{config.outputDirStats}{name}{config.addition}.txt"):
         os.remove(f"{config.outputDirStats}{name}{config.addition}.txt")
 
     clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement, name))
 
-    timeFunction(generateClusterGraph.__name__, lambda: generateClusterGraph(clu, projection, name))
+    if generateAllGraphs:
+        timeFunction(generateClusterGraph.__name__, lambda: generateClusterGraph(clu, projection, name))
 
     finalClusters, dagClusters, heatmapCluster = saveClustersToCsv(clu, mapping, inv_mapping, name)
 
@@ -566,7 +567,7 @@ def compareFinalClusters(finalClustersSequential, finalClustersStatistical):
     logging.info('------------------------')
 
 
-def readFolderWithPCAPs(useCache=True, useFileCache=True, forceFileCacheUse=True):
+def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=True):
     meta = {}
     mapping = {}
     totalLabels = defaultdict(int)
@@ -822,12 +823,13 @@ def connectionSummary(connections, selectedLabelsPerFile):
                 if label[0] == '-':
                     name = 'Benign'
                 f.write(f"{name} | {label[1]}\n")
+            f.write(f"Total & {len(connections)}\n")
         logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'Benign: {x[1]}', sorted(selectedLabelsPerFile.items()))))
 
 
 def appendStatsToOutputFile(extraName, stat, value):
     with open(f"{config.outputDirStats}{extraName}{config.addition}.txt", 'a') as f:
-        f.write(f"{stat} : {value}\n")
+        f.write(f"{stat}    &   {value}\n")
 
 
 def execute():

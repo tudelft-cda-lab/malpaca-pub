@@ -4,7 +4,7 @@ expname = 'exp'
 if len(sys.argv) > 3:
     expname = sys.argv[3]
 
-thresh = 20
+thresh = 75
 if len(sys.argv) > 4:
     thresh = int(sys.argv[4])
 
