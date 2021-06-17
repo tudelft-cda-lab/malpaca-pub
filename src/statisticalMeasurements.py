@@ -14,21 +14,20 @@ smallPacket = range(63, 400 + 1)
 commonPorts = [25, 53, 80, 119, 123, 143, 161, 443, 5353]
 uSToS = 1 / 1e6
 
-
-def getStatisticalNormalizedDistanceMeasurement(values, useCache=True):
-    if os.path.exists('data/statisticalDistance.pkl') and os.path.exists('data/normalizedProperties.pkl') and useCache:
+def getStatisticalNormalizedDistanceMeasurement(values):
+    if os.path.exists(config.statisticalDistanceCacheName) and os.path.exists(config.propertiesCacheName):
         logging.debug("Using cache for statisticalDistance")
-        with open('data/statisticalDistance.pkl', 'rb') as file:
+        with open(config.statisticalDistanceCacheName, 'rb') as file:
             ndm = pickle.load(file)
-        with open('data/normalizedProperties.pkl', 'rb') as file:
+        with open(config.propertiesCacheName, 'rb') as file:
             normalizedProperties = pickle.load(file)
     else:
         normalizedProperties = getPropertiesFromValues(values)
         ndm = normalizedStatisticalDistance(normalizedProperties)
 
-        with open('data/statisticalDistance.pkl', 'wb') as file:
+        with open(config.statisticalDistanceCacheName, 'wb') as file:
             pickle.dump(ndm, file)
-        with open('data/normalizedProperties.pkl', 'wb') as file:
+        with open(config.propertiesCacheName, 'wb') as file:
             pickle.dump(normalizedProperties, file)
 
     return normalizedProperties, ndm

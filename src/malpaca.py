@@ -1,21 +1,16 @@
 #!/usr/bin/python3
 import csv
-import datetime
 import glob
 import os
 import pickle
 import shutil
-import socket
 import sys
-import time
 import warnings
 import random
 from collections import deque, defaultdict
 from dataclasses import fields
-from typing import TypeVar, Callable
 import logging
 
-import dpkt
 import hdbscan
 import matplotlib
 import matplotlib.pyplot as plt
@@ -27,25 +22,24 @@ from sklearn.metrics import silhouette_samples
 from tqdm import tqdm
 
 import config
+from helpers import timeFunction
 from models import PackageInfo, ConnectionKey, StatisticalAnalysisProperties
+from processPCAP import readPCAP
 from sequentialMeasurements import getSequentialNormalizedDistanceMeasurement
 from statisticalMeasurements import getStatisticalNormalizedDistanceMeasurement
-
-T = TypeVar('T')
-
-random.seed(45)
 
 numba_logger = logging.getLogger('numba')
 matplotlib_logger = logging.getLogger('matplotlib')
 numba_logger.setLevel(logging.WARNING)
 matplotlib_logger.setLevel(logging.WARNING)
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+logging.basicConfig(level=config.logLevel, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
+
 plt.rcParams.update({'figure.max_open_warning': 0})
 warnings.filterwarnings("ignore", message="Attempting to set identical left == right")
 
 
-def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping, generateAllGraphs=False):
+def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
     values = list(metadata.values())
@@ -56,33 +50,33 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     sequentialProperties, normalizeDistanceMeasurementStatistical = timeFunction(
         getStatisticalNormalizedDistanceMeasurement.__name__,
-        lambda: getStatisticalNormalizedDistanceMeasurement(values, False)
+        lambda: getStatisticalNormalizedDistanceMeasurement(values)
     )
 
     normalizeDistanceMeasurementSequential = timeFunction(
         getSequentialNormalizedDistanceMeasurement.__name__,
-        lambda: getSequentialNormalizedDistanceMeasurement(values, False)
+        lambda: getSequentialNormalizedDistanceMeasurement(values)
     )
 
-    finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical', generateAllGraphs)
-    finalClustersSequential, heatmapClusterSequential = processMeasurements(normalizeDistanceMeasurementSequential, mapping, inv_mapping, 'Sequential', generateAllGraphs)
+    finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical')
+    finalClustersSequential, heatmapClusterSequential = processMeasurements(normalizeDistanceMeasurementSequential, mapping, inv_mapping, 'Sequential')
 
     # compareFinalClusters(finalClustersSequential, finalClustersStatistical)
 
-    if generateAllGraphs:
+    if config.generateAllGraphs:
         # clusterAmount = len(finalClusters)
         # generateDag(dagClusters, clusterAmount)
         timeFunction(generateGraphs.__name__, lambda: generateGraphs('Statistical', heatmapClusterStatistical, values, sequentialProperties))
         timeFunction(generateGraphs.__name__, lambda: generateGraphs('Sequential', heatmapClusterSequential, values, []))
 
 
-def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name, generateAllGraphs):
+def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name):
     if os.path.exists(f"{config.outputDirStats}{name}{config.addition}.txt"):
         os.remove(f"{config.outputDirStats}{name}{config.addition}.txt")
 
-    clu, projection = timeFunction(generateClusters.__name__, lambda: generateClusters(normalizeDistanceMeasurement, name))
+    clu, projection = timeFunction(f'[{name}] {generateClusters.__name__}', lambda: generateClusters(normalizeDistanceMeasurement, name))
 
-    if generateAllGraphs:
+    if config.generateTSNEGraphs:
         timeFunction(generateClusterGraph.__name__, lambda: generateClusterGraph(clu, projection, name))
 
     finalClusters, dagClusters, heatmapCluster = saveClustersToCsv(clu, mapping, inv_mapping, name)
@@ -143,9 +137,6 @@ def finalClusterSummary(finalClusters, inv_mapping: dict[int, ConnectionKey], ex
             averageClusterPurity.append(1)
             logging.debug(f"[{extraName}] Cluster {n} does not contain any malicious packages, connections: {len(cluster)}")
 
-    logging.debug(averageClusterPurity)
-    logging.debug(averageClusterMaliciousPurity)
-
     appendStatsToOutputFile(extraName, "Cluster purity", round(np.average(averageClusterPurity), 3))
     appendStatsToOutputFile(extraName, "Cluster malicious purity", round(np.average(averageClusterMaliciousPurity), 3))
 
@@ -179,7 +170,12 @@ def labelSummary(connectionKeys: list[ConnectionKey]):
 def generateClusterGraph(clusters, projection, extraName):
     labels = clusters.labels_
 
-    pal = sns.color_palette("colorblind", n_colors=len(set(labels)))
+    pal = sns.color_palette("colorblind", 10)
+    pal.extend(sns.color_palette('Set1', 10))
+    pal.extend(sns.color_palette('Set2', 10))
+    pal.extend(sns.color_palette('Set3', 10))
+    pal.extend(sns.color_palette('Paired', 9))
+
     col = [pal[x] for x in labels]
 
     plt.figure(figsize=(10, 10))
@@ -248,28 +244,23 @@ def generateClusters(normalizeDistanceMeasurement, extraName):
     amountOfClusters = len(set(clu.labels_)) - 1
 
     silhouetteScores = silhouette_samples(normalizeDistanceMeasurement, clu.labels_, metric='precomputed')
-    logging.info(f"[{extraName}] Number of clusters: {amountOfClusters}, clusterSize: {clusterSize}")
 
     avgClusterSize = 0
-    avgSilhoutteScore = 0
+    avgSilhouetteScore = 0
+
     for clusterNumber in list(set(clu.labels_)):
         if clusterNumber == -1:
             continue
         scoresForSpecificCluster = silhouetteScores[clu.labels_ == clusterNumber]
         silhouetteAverageForCluster = np.average(scoresForSpecificCluster)
-        avgSilhoutteScore += silhouetteAverageForCluster
+        avgSilhouetteScore += silhouetteAverageForCluster
         avgClusterSize += np.count_nonzero(clu.labels_ == clusterNumber)
-        # logging.info(f'[{extraName}] silhouette score for cluster {clusterNumber}, size {len(scoresForSpecificCluster)} is {silhouetteAverageForCluster}')
 
-    logging.info(f"[{extraName}] Average size of cluster: {avgClusterSize / amountOfClusters}")
-    logging.info(f"[{extraName}] Average silhouette Score of cluster: {avgSilhoutteScore / amountOfClusters}")
-    logging.info(f"[{extraName}] Samples in noise: {np.count_nonzero(clu.labels_ == -1)}")
-
-    appendStatsToOutputFile(extraName, "Number of clusters", amountOfClusters)
     appendStatsToOutputFile(extraName, "Clustering size", clusterSize)
-    appendStatsToOutputFile(extraName, "Average cluster size", round(avgClusterSize/amountOfClusters, 2))
-    appendStatsToOutputFile(extraName, "Average silhoutte score", round(avgSilhoutteScore/amountOfClusters, 3))
-    appendStatsToOutputFile(extraName, "Samples in noise", round(np.count_nonzero(clu.labels_ == -1) / len(normalizeDistanceMeasurement) * 100, 2))
+    appendStatsToOutputFile(extraName, "Number of clusters", amountOfClusters)
+    appendStatsToOutputFile(extraName, "Average cluster size", round((avgClusterSize/amountOfClusters)/len(normalizeDistanceMeasurement) * 100, 2))
+    appendStatsToOutputFile(extraName, "Average Silhouette score", round(avgSilhouetteScore / amountOfClusters, 3))
+    appendStatsToOutputFile(extraName, "Samples not in noise", round((len(normalizeDistanceMeasurement) - np.count_nonzero(clu.labels_ == -1)) / len(normalizeDistanceMeasurement), 3))
 
     return clu, projection
 
@@ -300,9 +291,9 @@ def generateGraphs(extraName, clusterInfo, values: list[list[PackageInfo]], prop
 
     wantedFeatures = [
         ("Packet sizes", PackageInfo.bytes.__name__),
-        ("Interval", PackageInfo.gap.__name__),
-        ("Source Port", PackageInfo.sourcePort.__name__),
-        ("Dest. Port", PackageInfo.destinationPort.__name__),
+        # ("Interval", PackageInfo.gap.__name__),
+        # ("Source Port", PackageInfo.sourcePort.__name__),
+        # ("Dest. Port", PackageInfo.destinationPort.__name__),
         ("Statistics", "statistics")
     ]
 
@@ -567,7 +558,7 @@ def compareFinalClusters(finalClustersSequential, finalClustersStatistical):
     logging.info('------------------------')
 
 
-def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=True):
+def readFolderWithPCAPs(useFileCache=True, forceFileCacheUse=True):
     meta = {}
     mapping = {}
     totalLabels = defaultdict(int)
@@ -578,12 +569,12 @@ def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=Tru
         files = glob.glob(sys.argv[2] + "/**/*.pcap")
     logging.info(f'About to read pcap... from {len(files)} files')
 
-    if os.path.exists('data/meta.pkl') and os.path.exists('data/mapping.pkl') and os.path.exists('data/totalLabels.pkl') and useCache:
-        with open('data/meta.pkl', 'rb') as file:
+    if os.path.exists(config.pklCache) and os.path.exists(config.mappingCache) and os.path.exists(config.totalLabelsCache):
+        with open(config.pklCache, 'rb') as file:
             meta = pickle.load(file)
-        with open('data/mapping.pkl', 'rb') as file:
+        with open(config.mappingCache, 'rb') as file:
             mapping = pickle.load(file)
-        with open('data/totalLabels.pkl', 'rb') as file:
+        with open(config.totalLabelsCache, 'rb') as file:
             totalLabels = pickle.load(file)
     else:
         for f in files:
@@ -642,11 +633,11 @@ def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=Tru
             for k, v in selectedLabelsPerFile.items():
                 totalLabels[k] += v
 
-        with open('data/meta.pkl', 'wb') as file:
+        with open(config.pklCache, 'wb') as file:
             pickle.dump(meta, file)
-        with open('data/mapping.pkl', 'wb') as file:
+        with open(config.mappingCache, 'wb') as file:
             pickle.dump(mapping, file)
-        with open('data/totalLabels.pkl', 'wb') as file:
+        with open(config.totalLabelsCache, 'wb') as file:
             pickle.dump(totalLabels, file)
 
     logging.info(f'Collective surviving connections {len(meta)}')
@@ -657,131 +648,6 @@ def readFolderWithPCAPs(useCache=False, useFileCache=True, forceFileCacheUse=Tru
         raise Exception
 
     return meta, mapping
-
-
-def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
-    preProcessed = defaultdict(list)
-    reachedSizeLimit = []
-
-    with open(filename, 'rb') as f:
-        pcap = dpkt.pcap.Reader(f)
-        for ts, pkt in tqdm(pcap, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
-            try:
-                eth = dpkt.ethernet.Ethernet(pkt)
-            except Exception:
-                continue
-
-            level3 = eth.data
-
-            if type(level3) is not dpkt.ip.IP:
-                continue
-
-            key = hash((level3.src, level3.dst))
-
-            if key in reachedSizeLimit:
-                continue
-
-            preProcessed[key].append((ts, pkt))
-
-            if len(preProcessed[key]) > cutOff:
-                reachedSizeLimit.append(key)
-
-    logging.info(f'Before cleanup: {len(preProcessed)} connections.')
-
-    flattened = []
-    for values in preProcessed.values():
-        if len(values) < config.thresh:
-            continue
-        flattened.extend(values)
-    del preProcessed
-
-    logging.info(f'After cleanup: {len(flattened)} packages.')
-
-    connections = defaultdict(list)
-    previousTimestamp = {}
-    count = 0
-
-    labels, lineCount = timeFunction(readLabeled.__name__, lambda: readLabeled(filename))
-
-    for ts, pkt in tqdm(flattened, unit='packages', unit_scale=True, postfix=filename, mininterval=0.5):
-        eth = dpkt.ethernet.Ethernet(pkt)
-
-        count += 1
-        level3 = eth.data
-
-        level4 = level3.data
-
-        src_ip = inet_to_str(level3.src)
-        dst_ip = inet_to_str(level3.dst)
-
-        key = (src_ip, dst_ip)
-        timestamp = datetime.datetime.utcfromtimestamp(ts)
-
-        if key in previousTimestamp:
-            gap = round((timestamp - previousTimestamp[key]).microseconds)
-        else:
-            gap = 0
-
-        previousTimestamp[key] = timestamp
-
-        if type(level4) is dpkt.tcp.TCP:
-            source_port = level4.sport
-            destination_port = level4.dport
-        elif type(level4) is dpkt.udp.UDP:
-            source_port = level4.sport
-            destination_port = level4.dport
-        else:
-            continue
-
-        label = labels.get(hash((src_ip, dst_ip, source_port, destination_port))) or labels.get(hash((dst_ip, src_ip, destination_port, source_port))) or '-'
-
-        flow_data = PackageInfo(gap, level3.len, source_port, destination_port, label)
-
-        connections[key].append(flow_data)
-
-    return {key: value for (key, value) in connections.items() if len(value) >= config.thresh}
-
-
-def readLabeled(filename) -> (dict[int, str], int):
-    labelsFilename = filename.replace("pcap", "labeled")
-    if not os.path.exists(labelsFilename):
-        logging.info(f"Label file for {filename} doesn't exist")
-        return {}, 0
-
-    connectionLabels = {}
-
-    line_count = 0
-    with open(labelsFilename, 'r') as f:
-        for _ in f:
-            line_count += 1
-
-    with open(labelsFilename, 'r') as f:
-        for line in tqdm(f, total=line_count, unit='lines', unit_scale=True, postfix=labelsFilename, mininterval=0.5):
-            labelFields = line.split("\x09")
-
-            if len(labelFields) != 21:
-                continue
-
-            sourceIp = labelFields[2]
-            sourcePort = int(labelFields[3])
-            destIp = labelFields[4]
-            destPort = int(labelFields[5])
-            labeling = labelFields[20].strip().split("   ")
-
-            key = hash((sourceIp, destIp, sourcePort, destPort))
-
-            connectionLabels[key] = labeling[2]
-
-    logging.info(f'Done reading {len(connectionLabels)} labels...')
-
-    return connectionLabels, line_count
-
-
-def inet_to_str(inet: bytes) -> str:
-    try:
-        return socket.inet_ntop(socket.AF_INET, inet)
-    except ValueError:
-        return socket.inet_ntop(socket.AF_INET6, inet)
 
 
 def getWantedWindow(v):
@@ -801,15 +667,6 @@ def getWantedWindow(v):
         return wantedWindow
 
 
-def timeFunction(name, fun: Callable[[], T]) -> T:
-    logging.debug(f"Started {name}...")
-    startTime = time.perf_counter()
-    value = fun()
-    endTime = time.perf_counter()
-    logging.debug(f"Completed {name} in {endTime - startTime:0.4f} seconds")
-    return value
-
-
 def connectionSummary(connections, selectedLabelsPerFile):
     connectionLengths = [len(x) for i, x in connections.items()]
     logging.debug(f"Different connections: {len(connections)}")
@@ -822,12 +679,13 @@ def connectionSummary(connections, selectedLabelsPerFile):
                 name = label[0].replace('&', '\&')
                 if label[0] == '-':
                     name = 'Benign'
-                f.write(f"{name} | {label[1]}\n")
+                f.write(f"{name} & {label[1]}\n")
             f.write(f"Total & {len(connections)}\n")
-        logging.debug(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'Benign: {x[1]}', sorted(selectedLabelsPerFile.items()))))
+        logging.info(', '.join(map(lambda x: f'{x[0]}: {x[1]}' if x[0] != '-' else f'Benign: {x[1]}', sorted(selectedLabelsPerFile.items()))))
 
 
 def appendStatsToOutputFile(extraName, stat, value):
+    logging.info(f"[{extraName}] {stat}: {value}")
     with open(f"{config.outputDirStats}{extraName}{config.addition}.txt", 'a') as f:
         f.write(f"{stat}    &   {value}\n")
 

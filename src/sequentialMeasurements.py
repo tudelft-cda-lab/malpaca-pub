@@ -10,11 +10,10 @@ import config
 from fastDistances import dtwDistance, ngramDistance
 from models import PackageInfo
 
-
-def getSequentialNormalizedDistanceMeasurement(values, useCache=True):
-    if os.path.exists('data/sequentialDistance.pkl') and useCache:
+def getSequentialNormalizedDistanceMeasurement(values):
+    if os.path.exists(config.sequentialDistanceCacheName):
         logging.debug("Using cache for sequentialDistance")
-        with open('data/sequentialDistance.pkl', 'rb') as file:
+        with open(config.sequentialDistanceCacheName, 'rb') as file:
             ndm = pickle.load(file)
     else:
         ndmBytes = normalizedByteDistance(values)
@@ -23,7 +22,7 @@ def getSequentialNormalizedDistanceMeasurement(values, useCache=True):
         ndmDestinationPort = normalizedDestinationPortDistance(values)
         ndm = normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
 
-        with open('data/sequentialDistance.pkl', 'wb') as file:
+        with open(config.sequentialDistanceCacheName, 'wb') as file:
             pickle.dump(ndm, file)
 
     return ndm
