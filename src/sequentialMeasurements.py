@@ -6,20 +6,20 @@ import numpy as np
 from numba.core import types
 from numba.typed import Dict, List
 
-import config
 from fastDistances import dtwDistance, ngramDistance
 from models import PackageInfo
 
-def getSequentialNormalizedDistanceMeasurement(values):
+
+def getSequentialNormalizedDistanceMeasurement(values, config):
     if os.path.exists(config.sequentialDistanceCacheName):
         logging.debug("Using cache for sequentialDistance")
         with open(config.sequentialDistanceCacheName, 'rb') as file:
             ndm = pickle.load(file)
     else:
-        ndmBytes = normalizedByteDistance(values)
-        ndmGaps = normalizedGapsDistance(values)
-        ndmSourcePort = normalizedSourcePortDistance(values)
-        ndmDestinationPort = normalizedDestinationPortDistance(values)
+        ndmBytes = normalizedByteDistance(values, config)
+        ndmGaps = normalizedGapsDistance(values, config)
+        ndmSourcePort = normalizedSourcePortDistance(values, config)
+        ndmDestinationPort = normalizedDestinationPortDistance(values, config)
         ndm = normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
 
         with open(config.sequentialDistanceCacheName, 'wb') as file:
@@ -32,7 +32,7 @@ def normalizedDistanceMeasurement(*args):
     return sum(args) / len(args)
 
 
-def normalizedByteDistance(values: list[list[PackageInfo]]):
+def normalizedByteDistance(values: list[list[PackageInfo]], config):
     filename = 'bytesDist' + config.addition + '.txt'
 
     bytesDistances = np.zeros((len(values), config.thresh))
@@ -49,7 +49,7 @@ def normalizedByteDistance(values: list[list[PackageInfo]]):
     return distm / distm.max()
 
 
-def normalizedGapsDistance(values: list[list[PackageInfo]]):
+def normalizedGapsDistance(values: list[list[PackageInfo]], config):
     filename = 'gapsDist' + config.addition + '.txt'
 
     gapsDistances = np.zeros((len(values), config.thresh))
@@ -66,23 +66,23 @@ def normalizedGapsDistance(values: list[list[PackageInfo]]):
     return distm / distm.max()
 
 
-def normalizedSourcePortDistance(values: list[list[PackageInfo]]):
+def normalizedSourcePortDistance(values: list[list[PackageInfo]], config):
     filename = 'sportDist' + config.addition + '.txt'
 
     ngrams = generateNGrams(PackageInfo.sourcePort.__name__, values)
 
-    return generateCosineDistanceFromNGramsAndSave(filename, ngrams)
+    return generateCosineDistanceFromNGramsAndSave(filename, ngrams, config)
 
 
-def normalizedDestinationPortDistance(values: list[list[PackageInfo]]):
+def normalizedDestinationPortDistance(values: list[list[PackageInfo]], config):
     filename = 'dportDist' + config.addition + '.txt'
 
     ngrams = generateNGrams(PackageInfo.destinationPort.__name__, values)
 
-    return generateCosineDistanceFromNGramsAndSave(filename, ngrams)
+    return generateCosineDistanceFromNGramsAndSave(filename, ngrams, config)
 
 
-def generateCosineDistanceFromNGramsAndSave(filename, ngrams):
+def generateCosineDistanceFromNGramsAndSave(filename, ngrams, config):
     distm = ngramDistance(ngrams)
 
     with open(config.outputDirDist + filename, 'w') as outfile:

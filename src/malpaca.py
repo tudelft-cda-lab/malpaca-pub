@@ -3,7 +3,7 @@ import csv
 import glob
 import os
 import pickle
-import shutil
+# import shutil
 import sys
 import warnings
 import random
@@ -21,7 +21,7 @@ from sklearn.manifold import TSNE
 from sklearn.metrics import silhouette_samples
 from tqdm import tqdm
 
-import config
+from config import Config
 from helpers import timeFunction
 from models import PackageInfo, ConnectionKey, StatisticalAnalysisProperties
 from processPCAP import readPCAP
@@ -32,6 +32,10 @@ numba_logger = logging.getLogger('numba')
 matplotlib_logger = logging.getLogger('matplotlib')
 numba_logger.setLevel(logging.WARNING)
 matplotlib_logger.setLevel(logging.WARNING)
+
+config = Config(_thresh=20, _seed=0)
+results = defaultdict(dict)
+# results = pd.DataFrame(columns=['Type', 'Clustering size', 'Number of clusters', 'Average cluster size', 'Average Silhouette score', 'Samples not in noise', 'Cluster purity', 'Cluster malicious purity'])
 
 logging.basicConfig(level=config.logLevel, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
 
@@ -50,12 +54,12 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     sequentialProperties, normalizeDistanceMeasurementStatistical = timeFunction(
         getStatisticalNormalizedDistanceMeasurement.__name__,
-        lambda: getStatisticalNormalizedDistanceMeasurement(values)
+        lambda: getStatisticalNormalizedDistanceMeasurement(values, config)
     )
 
     normalizeDistanceMeasurementSequential = timeFunction(
         getSequentialNormalizedDistanceMeasurement.__name__,
-        lambda: getSequentialNormalizedDistanceMeasurement(values)
+        lambda: getSequentialNormalizedDistanceMeasurement(values, config)
     )
 
     finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical')
@@ -87,17 +91,18 @@ def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name
 
 
 def generateOutputFolders():
-    if os.path.exists(config.outputDir):
-        shutil.rmtree(config.outputDir)
-    os.mkdir(config.outputDir)
-    os.mkdir(config.outputDirRaw)
-    os.mkdir(config.outputDirDist)
-    os.mkdir(config.outputDirFigs)
-    os.mkdir(config.outputDirFigs + '/bytes')
-    os.mkdir(config.outputDirFigs + '/gap')
-    os.mkdir(config.outputDirFigs + '/sourcePort')
-    os.mkdir(config.outputDirFigs + '/destinationPort')
-    os.mkdir(config.outputDirFigs + '/statistics')
+    if not os.path.exists(config.outputDir):
+        # shutil.rmtree(config.outputDir)
+        os.mkdir(config.outputDir)
+        os.mkdir(config.outputDirRaw)
+        os.mkdir(config.outputDirDist)
+    if not os.path.exists(config.outputDirFigs):
+        os.mkdir(config.outputDirFigs)
+        os.mkdir(config.outputDirFigs + '/bytes')
+        os.mkdir(config.outputDirFigs + '/gap')
+        os.mkdir(config.outputDirFigs + '/sourcePort')
+        os.mkdir(config.outputDirFigs + '/destinationPort')
+        os.mkdir(config.outputDirFigs + '/statistics')
 
 
 def storeRawData(values):
@@ -590,7 +595,7 @@ def readFolderWithPCAPs(useFileCache=True, forceFileCacheUse=True):
                     connections = pickle.load(file)
             elif not forceFileCacheUse:
                 logging.info(f'Reading file: {cacheKey}')
-                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f))
+                connections = timeFunction(readPCAP.__name__, lambda: readPCAP(f, config))
 
                 if len(connections.items()) < 1:
                     continue
@@ -685,14 +690,22 @@ def connectionSummary(connections, selectedLabelsPerFile):
 
 
 def appendStatsToOutputFile(extraName, stat, value):
+    results[f'{extraName}{config.addition}']['type'] = extraName
+    results[f'{extraName}{config.addition}']['threshold'] = config.thresh
+    results[f'{extraName}{config.addition}']['seed'] = config.seed
+    results[f'{extraName}{config.addition}'][stat] = value
     logging.info(f"[{extraName}] {stat}: {value}")
     with open(f"{config.outputDirStats}{extraName}{config.addition}.txt", 'a') as f:
         f.write(f"{stat}    &   {value}\n")
 
 
 def execute():
-    meta, mapping = timeFunction(readFolderWithPCAPs.__name__, lambda: readFolderWithPCAPs())
-    timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
+    for i in range(10):
+        config.seed = i
+        meta, mapping = timeFunction(readFolderWithPCAPs.__name__, lambda: readFolderWithPCAPs())
+        timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
+        print(results)
+        pd.DataFrame.from_dict(results).T.rename_axis('Name').to_csv(f'{config.outputDirStats}stats.csv')
 
 
 def main():

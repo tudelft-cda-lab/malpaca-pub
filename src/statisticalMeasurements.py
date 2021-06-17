@@ -7,14 +7,13 @@ import pandas as pd
 from fastdist import fastdist
 from sklearn.preprocessing import normalize
 
-import config
 from models import PackageInfo, StatisticalAnalysisProperties
 
 smallPacket = range(63, 400 + 1)
 commonPorts = [25, 53, 80, 119, 123, 143, 161, 443, 5353]
 uSToS = 1 / 1e6
 
-def getStatisticalNormalizedDistanceMeasurement(values):
+def getStatisticalNormalizedDistanceMeasurement(values, config):
     if os.path.exists(config.statisticalDistanceCacheName) and os.path.exists(config.propertiesCacheName):
         logging.debug("Using cache for statisticalDistance")
         with open(config.statisticalDistanceCacheName, 'rb') as file:
@@ -22,7 +21,7 @@ def getStatisticalNormalizedDistanceMeasurement(values):
         with open(config.propertiesCacheName, 'rb') as file:
             normalizedProperties = pickle.load(file)
     else:
-        normalizedProperties = getPropertiesFromValues(values)
+        normalizedProperties = getPropertiesFromValues(values, config)
         ndm = normalizedStatisticalDistance(normalizedProperties)
 
         with open(config.statisticalDistanceCacheName, 'wb') as file:
@@ -39,7 +38,7 @@ def normalizedStatisticalDistance(normalizedProperties):
     return distm / distm.max()
 
 
-def getPropertiesFromValues(values: list[list[PackageInfo]]):
+def getPropertiesFromValues(values: list[list[PackageInfo]], config):
     properties = []
 
     for i, packets in enumerate(values):

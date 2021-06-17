@@ -7,12 +7,11 @@ from collections import defaultdict
 import dpkt
 from tqdm import tqdm
 
-import config
 from helpers import timeFunction
 from models import PackageInfo
 
 
-def readPCAP(filename, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
+def readPCAP(filename, config, cutOff=5000) -> dict[tuple[str, str], list[PackageInfo]]:
     preProcessed = defaultdict(list)
     reachedSizeLimit = []
 
