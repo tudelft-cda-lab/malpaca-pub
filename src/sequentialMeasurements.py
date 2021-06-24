@@ -22,8 +22,9 @@ def getSequentialNormalizedDistanceMeasurement(values, config):
         ndmDestinationPort = normalizedDestinationPortDistance(values, config)
         ndm = normalizedDistanceMeasurement(ndmBytes, ndmGaps, ndmSourcePort, ndmDestinationPort)
 
-        with open(config.sequentialDistanceCacheName, 'wb') as file:
-            pickle.dump(ndm, file)
+        if config.saveDistanceCache:
+            with open(config.sequentialDistanceCacheName, 'wb') as file:
+                pickle.dump(ndm, file)
 
     return ndm
 
@@ -42,9 +43,10 @@ def normalizedByteDistance(values: list[list[PackageInfo]], config):
 
     distm = dtwDistance(bytesDistances)
 
-    with open(config.outputDirDist + filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    if config.generateDist:
+        with open(config.outputDirDist + filename, 'w') as outfile:
+            for a in range(len(distm)):
+                outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     return distm / distm.max()
 
@@ -59,9 +61,10 @@ def normalizedGapsDistance(values: list[list[PackageInfo]], config):
 
     distm = dtwDistance(gapsDistances)
 
-    with open(config.outputDirDist + filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    if config.generateDist:
+        with open(config.outputDirDist + filename, 'w') as outfile:
+            for a in range(len(distm)):
+                outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     return distm / distm.max()
 
@@ -85,9 +88,10 @@ def normalizedDestinationPortDistance(values: list[list[PackageInfo]], config):
 def generateCosineDistanceFromNGramsAndSave(filename, ngrams, config):
     distm = ngramDistance(ngrams)
 
-    with open(config.outputDirDist + filename, 'w') as outfile:
-        for a in range(len(distm)):
-            outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
+    if config.generateDist:
+        with open(config.outputDirDist + filename, 'w') as outfile:
+            for a in range(len(distm)):
+                outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     return distm
 

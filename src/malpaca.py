@@ -33,9 +33,8 @@ matplotlib_logger = logging.getLogger('matplotlib')
 numba_logger.setLevel(logging.WARNING)
 matplotlib_logger.setLevel(logging.WARNING)
 
-config = Config(_thresh=20, _seed=0)
+config = Config(_thresh=75, _seed=0)
 results = defaultdict(dict)
-# results = pd.DataFrame(columns=['Type', 'Clustering size', 'Number of clusters', 'Average cluster size', 'Average Silhouette score', 'Samples not in noise', 'Cluster purity', 'Cluster malicious purity'])
 
 logging.basicConfig(level=config.logLevel, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
 
@@ -50,7 +49,8 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
 
     generateOutputFolders()
 
-    storeRawData(values)
+    if config.generateRaw:
+        storeRawData(values)
 
     sequentialProperties, normalizeDistanceMeasurementStatistical = timeFunction(
         getStatisticalNormalizedDistanceMeasurement.__name__,
@@ -96,7 +96,8 @@ def generateOutputFolders():
         os.mkdir(config.outputDir)
         os.mkdir(config.outputDirRaw)
         os.mkdir(config.outputDirDist)
-    if not os.path.exists(config.outputDirFigs):
+
+    if not os.path.exists(config.outputDirFigs) and config.generateAllGraphs:
         os.mkdir(config.outputDirFigs)
         os.mkdir(config.outputDirFigs + '/bytes')
         os.mkdir(config.outputDirFigs + '/gap')
@@ -700,12 +701,13 @@ def appendStatsToOutputFile(extraName, stat, value):
 
 
 def execute():
-    for i in range(10):
+    for i in range(100):
         config.seed = i
         meta, mapping = timeFunction(readFolderWithPCAPs.__name__, lambda: readFolderWithPCAPs())
         timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
-        print(results)
-        pd.DataFrame.from_dict(results).T.rename_axis('Name').to_csv(f'{config.outputDirStats}stats.csv')
+
+        resultsDf = pd.DataFrame.from_dict(results).T.rename_axis('Name')
+        resultsDf.to_csv(f'{config.outputDirStats}stats-{config.thresh}.csv')
 
 
 def main():

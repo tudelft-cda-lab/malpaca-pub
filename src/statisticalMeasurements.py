@@ -24,10 +24,11 @@ def getStatisticalNormalizedDistanceMeasurement(values, config):
         normalizedProperties = getPropertiesFromValues(values, config)
         ndm = normalizedStatisticalDistance(normalizedProperties)
 
-        with open(config.statisticalDistanceCacheName, 'wb') as file:
-            pickle.dump(ndm, file)
-        with open(config.propertiesCacheName, 'wb') as file:
-            pickle.dump(normalizedProperties, file)
+        if config.saveDistanceCache:
+            with open(config.statisticalDistanceCacheName, 'wb') as file:
+                pickle.dump(ndm, file)
+            with open(config.propertiesCacheName, 'wb') as file:
+                pickle.dump(normalizedProperties, file)
 
     return normalizedProperties, ndm
 
@@ -80,9 +81,10 @@ def getPropertiesFromValues(values: list[list[PackageInfo]], config):
 
     filename = 'statisticalProperties' + config.addition + '.txt'
 
-    with open(config.outputDirDist + filename, 'w') as outfile:
-        for i, pProperty in enumerate(properties):
-            outfile.write(pProperty.__str__() + "\n")
+    if config.generateDist:
+        with open(config.outputDirDist + filename, 'w') as outfile:
+            for i, pProperty in enumerate(properties):
+                outfile.write(pProperty.__str__() + "\n")
 
     preClip = pd.DataFrame(distances)
     clippedDistances = preClip.clip(lower=preClip.quantile(0.025), upper=preClip.quantile(0.975), axis=1)

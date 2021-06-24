@@ -15,6 +15,10 @@ class Config:
     outputDirStats = 'stats/'
 
     logLevel = logging.INFO
+
+    generateRaw = False
+    generateDist = False
+    saveDistanceCache = False
     generateTSNEGraphs = False
     generateAllGraphs = False
 
