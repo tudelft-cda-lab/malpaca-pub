@@ -709,20 +709,6 @@ def execute():
         resultsDf = pd.DataFrame.from_dict(results).T.rename_axis('Name')
         resultsDf.to_csv(f'{config.outputDirStats}stats-{config.thresh}.csv')
 
-        config.seed = i + 2
-        meta2, mapping2 = timeFunction(readFolderWithPCAPs.__name__, lambda: readFolderWithPCAPs())
-        set1 = set(mapping.keys())
-        set2 = set(mapping2.keys())
-        print(set2)
-
-        print('union', len(set1.union(set2)))
-        print('intersection', len(set1.intersection(set2)))
-        print('difference', len(set1.symmetric_difference(set2)))
-        timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta2, mapping2))
-
-        resultsDf = pd.DataFrame.from_dict(results).T.rename_axis('Name')
-        resultsDf.to_csv(f'{config.outputDirStats}stats-{config.thresh}.csv')
-
 
 def main():
     if len(sys.argv) < 2:
