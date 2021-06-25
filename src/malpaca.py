@@ -33,7 +33,7 @@ matplotlib_logger = logging.getLogger('matplotlib')
 numba_logger.setLevel(logging.WARNING)
 matplotlib_logger.setLevel(logging.WARNING)
 
-config = Config(_thresh=75, _seed=0)
+config = Config(_thresh=24, _seed=0)
 results = defaultdict(dict)
 
 logging.basicConfig(level=config.logLevel, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%H:%M:%S')
@@ -65,7 +65,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
     finalClustersStatistical, heatmapClusterStatistical = processMeasurements(normalizeDistanceMeasurementStatistical, mapping, inv_mapping, 'Statistical')
     finalClustersSequential, heatmapClusterSequential = processMeasurements(normalizeDistanceMeasurementSequential, mapping, inv_mapping, 'Sequential')
 
-    # compareFinalClusters(finalClustersSequential, finalClustersStatistical)
+    compareFinalClusters(finalClustersSequential, finalClustersStatistical)
 
     if config.generateAllGraphs:
         # clusterAmount = len(finalClusters)
@@ -564,7 +564,7 @@ def compareFinalClusters(finalClustersSequential, finalClustersStatistical):
     logging.info('------------------------')
 
 
-def readFolderWithPCAPs(useFileCache=True, forceFileCacheUse=True):
+def readFolderWithPCAPs(useFileCache=False, forceFileCacheUse=True):
     meta = {}
     mapping = {}
     totalLabels = defaultdict(int)
@@ -625,8 +625,8 @@ def readFolderWithPCAPs(useFileCache=True, forceFileCacheUse=True):
 
                     label = labels.pop()
 
-                    if selectedLabelsPerFile[label] >= 200:
-                        continue
+                    # if selectedLabelsPerFile[label] >= 200:
+                    #     continue
 
                     key = ConnectionKey(cacheKey, i[0], i[1], window, selection[0].connectionLabel)
 
@@ -701,10 +701,24 @@ def appendStatsToOutputFile(extraName, stat, value):
 
 
 def execute():
-    for i in range(100):
+    for i in range(1):
         config.seed = i
         meta, mapping = timeFunction(readFolderWithPCAPs.__name__, lambda: readFolderWithPCAPs())
         timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
+
+        resultsDf = pd.DataFrame.from_dict(results).T.rename_axis('Name')
+        resultsDf.to_csv(f'{config.outputDirStats}stats-{config.thresh}.csv')
+
+        config.seed = i + 2
+        meta2, mapping2 = timeFunction(readFolderWithPCAPs.__name__, lambda: readFolderWithPCAPs())
+        set1 = set(mapping.keys())
+        set2 = set(mapping2.keys())
+        print(set2)
+
+        print('union', len(set1.union(set2)))
+        print('intersection', len(set1.intersection(set2)))
+        print('difference', len(set1.symmetric_difference(set2)))
+        timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta2, mapping2))
 
         resultsDf = pd.DataFrame.from_dict(results).T.rename_axis('Name')
         resultsDf.to_csv(f'{config.outputDirStats}stats-{config.thresh}.csv')

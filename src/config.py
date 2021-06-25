@@ -51,24 +51,24 @@ class Config:
 
     @property
     def sequentialDistanceCacheName(self):
-        return f'data/sequentialDistance-{self.thresh}-{self.seed}.pkl'
+        return f'cache/sequentialDistance-{self.thresh}-{self.seed}.pkl'
 
     @property
     def statisticalDistanceCacheName(self):
-        return f'data/statisticalDistance-{self.thresh}-{self.seed}.pkl'
+        return f'cache/statisticalDistance-{self.thresh}-{self.seed}.pkl'
 
     @property
     def propertiesCacheName(self):
-        return f'data/normalizedProperties-{self.thresh}-{self.seed}.pkl'
+        return f'cache/normalizedProperties-{self.thresh}-{self.seed}.pkl'
 
     @property
     def pklCache(self):
-        return f'data/meta-{self.thresh}-{self.seed}.pkl'
+        return f'cache/meta-{self.thresh}-{self.seed}.pkl'
 
     @property
     def mappingCache(self):
-        return f'data/mapping-{self.thresh}-{self.seed}.pkl'
+        return f'cache/mapping-{self.thresh}-{self.seed}.pkl'
 
     @property
     def totalLabelsCache(self):
-        return f'data/totalLabels-{self.thresh}-{self.seed}.pkl'
+        return f'cache/totalLabels-{self.thresh}-{self.seed}.pkl'

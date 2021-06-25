@@ -3,4 +3,5 @@ data
 output
 venv
 stats
+cache
 */__pycache__/*
