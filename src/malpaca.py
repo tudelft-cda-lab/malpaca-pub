@@ -42,7 +42,7 @@ plt.rcParams.update({'figure.max_open_warning': 0})
 warnings.filterwarnings("ignore", message="Attempting to set identical left == right")
 
 
-def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping):
+def calculateDistancesAndGenerateOutput(metadata: dict[ConnectionKey, list[PackageInfo]], mapping):
     inv_mapping: dict[int, ConnectionKey] = {v: k for k, v in mapping.items()}
 
     values = list(metadata.values())
@@ -52,7 +52,7 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
     if config.generateRaw:
         storeRawData(values)
 
-    sequentialProperties, normalizeDistanceMeasurementStatistical = timeFunction(
+    statisticalProperties, normalizeDistanceMeasurementStatistical = timeFunction(
         getStatisticalNormalizedDistanceMeasurement.__name__,
         lambda: getStatisticalNormalizedDistanceMeasurement(values, config)
     )
@@ -70,8 +70,8 @@ def connlevel_sequence(metadata: dict[ConnectionKey, list[PackageInfo]], mapping
     if config.generateAllGraphs:
         # clusterAmount = len(finalClusters)
         # generateDag(dagClusters, clusterAmount)
-        timeFunction(generateGraphs.__name__, lambda: generateGraphs('Statistical', heatmapClusterStatistical, values, sequentialProperties))
-        timeFunction(generateGraphs.__name__, lambda: generateGraphs('Sequential', heatmapClusterSequential, values, []))
+        timeFunction(generateGraphs.__name__, lambda: generateGraphs('Statistical', heatmapClusterStatistical, values, statisticalProperties))
+        timeFunction(generateGraphs.__name__, lambda: generateGraphs('Sequential', heatmapClusterSequential, values, statisticalProperties))
 
 
 def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name):
@@ -92,7 +92,6 @@ def processMeasurements(normalizeDistanceMeasurement, mapping, inv_mapping, name
 
 def generateOutputFolders():
     if not os.path.exists(config.outputDir):
-        # shutil.rmtree(config.outputDir)
         os.mkdir(config.outputDir)
         os.mkdir(config.outputDirRaw)
         os.mkdir(config.outputDirDist)
@@ -704,7 +703,7 @@ def execute():
     for i in range(1):
         config.seed = i
         meta, mapping = timeFunction(readFolderWithPCAPs.__name__, lambda: readFolderWithPCAPs())
-        timeFunction(connlevel_sequence.__name__, lambda: connlevel_sequence(meta, mapping))
+        timeFunction(calculateDistancesAndGenerateOutput.__name__, lambda: calculateDistancesAndGenerateOutput(meta, mapping))
 
         resultsDf = pd.DataFrame.from_dict(results).T.rename_axis('Name')
         resultsDf.to_csv(f'{config.outputDirStats}stats-{config.thresh}.csv')

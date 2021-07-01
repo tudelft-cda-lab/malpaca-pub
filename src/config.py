@@ -18,9 +18,9 @@ class Config:
 
     generateRaw = False
     generateDist = False
-    saveDistanceCache = False
+    saveDistanceCache = True
     generateTSNEGraphs = False
-    generateAllGraphs = False
+    generateAllGraphs = True
 
     @property
     def seed(self):
@@ -58,8 +58,8 @@ class Config:
         return f'cache/statisticalDistance-{self.thresh}-{self.seed}.pkl'
 
     @property
-    def propertiesCacheName(self):
-        return f'cache/normalizedProperties-{self.thresh}-{self.seed}.pkl'
+    def statisticalPropertiesCacheName(self):
+        return f'cache/statisticalNormalizedProperties-{self.thresh}-{self.seed}.pkl'
 
     @property
     def pklCache(self):
