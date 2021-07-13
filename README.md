@@ -55,13 +55,16 @@ Required packages:
 
 **If you use MalPaCA in a scientific work, consider citing the following paper:**
 
-_@article{nadeembeyond,
+```
+@article{nadeembeyond,
   title={Beyond Labeling: Using Clustering to Build Network Behavioral Profiles of Malware Families},
   author={Nadeem, Azqa and Hammerschmidt, Christian and Ga{\~n}{\'a}n, Carlos H and Verwer, Sicco},
   journal={Malware Analysis Using Artificial Intelligence and Deep Learning},
   pages={381},
-  publisher={Springer}
-}_
+  publisher={Springer},
+  year={2021}
+}
+```
 
 #### Azqa Nadeem
 #### TU Delft
