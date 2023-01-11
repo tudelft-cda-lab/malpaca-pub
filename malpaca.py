@@ -44,17 +44,6 @@ thresh = 20
 if len(sys.argv) > 4:
     thresh = int(sys.argv[4])
 
-RPY2 = False
-if len(sys.argv) > 5:
-    RPY2 = bool(sys.argv[5])
-
-if RPY2 == True:
-    import rpy2.robjects as robjects
-    import rpy2.robjects.packages as rpackages
-    from rpy2.robjects.vectors import StrVector
-    from rpy2.robjects.packages import importr
-    from rpy2.robjects import r
-    from rpy2.robjects import ListVector
 
 #@profile
 def connlevel_sequence(metadata, mapping):
@@ -84,28 +73,6 @@ def connlevel_sequence(metadata, mapping):
 
     # ----- start porting -------
 
-    utils, r = None, None
-    if RPY2:
-
-        packageNames = ('IncDTW', 'rx2')
-        utils = rpackages.importr('utils')
-        base = rpackages.importr('base')
-        utils.chooseCRANmirror(ind=1)
-        to_install = [x for x in packageNames if not rpackages.isinstalled(x)]
-        for x in to_install:
-            utils.install_packages(x)
-        dtw = rpackages.importr('IncDTW')
-        r  = robjects.r
-
-    for n,feat in [(1, 'bytes'), (0, 'gaps'), (3, 'sport'), (4, 'dport')]:
-        f = open(feat+'-features'+addition, 'w')
-        for val in values:
-                vi = [str(x[n]) for x in val]
-                f.write(','.join(vi))
-                f.write("\n")
-        f.close()
-
-
 
     startb = time.time()
 
@@ -126,64 +93,25 @@ def connlevel_sequence(metadata, mapping):
         print( "found bytes.txt")
 
     else:
-        if RPY2:
-            bytes = []
-            for i in range(len(values)):
-                
-                labels.append(mapping[keys[i]])
-                ipmapping.append((mapping[keys[i]], inv_mapping[mapping[keys[i]]]))
+        print("starting bytes dist")
 
-                #f.write("%s\n" % [x[1] for x in values[i]][:thresh])
-                #arr = [x[1] for x in values[i]][:thresh]
-                #arr = [int(x) for x in arr]
-                bytes.append("%s\n" % [x[1] for x in values[i]][:thresh])
+        distm = [-1] * len(data.values())
+        distm = [[-1]*len(data.values()) for i in distm]
 
+        for a in range(len(data.values())): #range(10):
+            labels.append(mapping[keys[a]])
+            ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
+            for b in range(a+1):
+                i = [x[1] for x in values[a]][:thresh]
+                j = [x[1] for x in values[b]][:thresh]
+                if len(i) == 0 or len(j) == 0: continue
 
-            #data = r['readLines'](orig_filename)
-            bytes = r['gsub']("\\[|\\]", "", bytes)
-            fun = r('function(x) as.numeric(unlist(strsplit(x, "\\\\,")))')
-            bytes = r['lapply'](bytes, fun)
-            #print(bytes)
-            args = {'lot': bytes, 'dist_method' : 'norm2', 'step_pattern' : 'symmetric1', 'normalize' : False, 'ws' : robjects.NULL, 'threshold' : robjects.NULL, 'return_matrix' : True, 'ncores' : robjects.NULL, 'useRcppParallel' : True}
-            bytesdistance = dtw.dtw_dismat(**args)
-            #print(bytesdistance.rx2('dismat'))
-            bytes = bytesdistance.rx2('dismat')
-           
-            distm = []
-            vals = []
-            for i in range(len(bytes)):
-                vals.append(bytes[i])
-                if (i+1)%len(values) == 0:
-                    distm.append(vals)
-                    vals = []
-                #print(vals, distm)
-                
-            
-
-        else:
-            print("starting bytes dist")
-
-            distm = [-1] * len(data.values())
-            distm = [[-1]*len(data.values()) for i in distm]
-
-            for a in range(len(data.values())): #range(10):
-
-
-                labels.append(mapping[keys[a]])
-                ipmapping.append((mapping[keys[a]], inv_mapping[mapping[keys[a]]]))
-                for b in range(a+1):
-                   
-
-                    i = [x[1] for x in values[a]][:thresh]
-                    j = [x[1] for x in values[b]][:thresh]
-                    if len(i) == 0 or len(j) == 0: continue
-
-                    if a==b:
-                        distm[a][b] = 0.0
-                    else:                            
-                        dist,_= fastdtw(i,j,dist=euclidean)
-                        distm[a][b] = dist
-                        distm[b][a] = dist
+                if a==b:
+                    distm[a][b] = 0.0
+                else:
+                    dist= dtw(i, j, dist_method="euclidean").distance#fastdtw(i,j,dist=euclidean)
+                    distm[a][b] = dist
+                    distm[b][a] = dist
 
         with open(filename, 'w') as outfile:
             for a in range(len(distm)):#len(data.values())): #range(10):
@@ -193,7 +121,7 @@ def connlevel_sequence(metadata, mapping):
         with open('mapping'+addition+'.txt', 'w') as outfile:
            outfile.write(' '.join([str(l) for l in ipmapping]) + '\n')
     endb = time.time()
-    print('bytes ', (endb-startb))
+    print('+++++++ TIME: bytes ', (endb-startb))
     ndistmB = []
     mini = min(min(distm))
     maxi = max(max(distm))
@@ -227,50 +155,27 @@ def connlevel_sequence(metadata, mapping):
 
         #print distm
         print( "found gaps.txt")
-    else:    
-        if RPY2:
-            gaps = []
-            for i in range(len(values)):
-                gaps.append("%s\n" % [x[0] for x in values[i]][:thresh])
+    else:
+        print("starting gaps dist")
+        distm = [-1] * len(data.values())
+        distm = [[-1]*len(data.values()) for i in distm]
 
-            gaps = r['gsub']("\\[|\\]", "", gaps)
-            fun = r('function(x) as.numeric(unlist(strsplit(x, "\\\\,")))')
-            gaps = r['lapply'](gaps, fun)
-            #print(gaps)
-            args = {'lot': gaps, 'dist_method' : 'norm2', 'step_pattern' : 'symmetric1', 'normalize' : False, 'ws' : robjects.NULL, 'threshold' : robjects.NULL, 'return_matrix' : True, 'ncores' : robjects.NULL, 'useRcppParallel' : True}
-            gapsdistance = dtw.dtw_dismat(**args)
-            #print(gapsdistance.rx2('dismat'))
-            gaps = gapsdistance.rx2('dismat')
-            distm = []
-            vals = []
-            for i in range(len(gaps)):
-                vals.append(gaps[i])
-                if (i+1)%len(values) == 0:
-                    distm.append(vals)
-                    vals = []
-                #print(vals, distm)
-        else:
-            print("starting gaps dist")
-            distm = [-1] * len(data.values())
-            distm = [[-1]*len(data.values()) for i in distm]
+        for a in range(len(data.values())): #range(10):
 
-            for a in range(len(data.values())): #range(10):
+            for b in range(a+1):
 
-                for b in range(a+1):
+                i = [x[0] for x in values[a]][:thresh]
+                j = [x[0] for x in values[b]][:thresh]
 
-                    i = [x[0] for x in values[a]][:thresh]
-                    j = [x[0] for x in values[b]][:thresh]
+                if len(i) == 0 or len(j) == 0: continue
 
-                    if len(i) == 0 or len(j) == 0: continue
+                if a==b:
+                    distm[a][b] = 0.0
+                else:
+                    dist= dtw(i, j, dist_method="euclidean").distance#fastdtw(i,j,dist=euclidean)
+                    distm[a][b] = dist
+                    distm[b][a] = dist
 
-                    if a==b:
-                        distm[a][b] = 0.0
-                    else:                                
-                        dist,_= fastdtw(i,j,dist=euclidean)
-                        distm[a][b] = dist
-                        distm[b][a] = dist
-
-                    
 
         with open(filename, 'w') as outfile:
             for a in range(len(distm)):#len(data.values())): #range(10):
@@ -278,7 +183,7 @@ def connlevel_sequence(metadata, mapping):
                 outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     endg = time.time()
-    print('gaps ', (endg-startg))
+    print('+++++++ TIME: gaps ', (endg-startg))
     ndistmG = []
     mini = min(min(distm))
     maxi = max(max(distm))
@@ -369,7 +274,7 @@ def connlevel_sequence(metadata, mapping):
                 outfile.write(' '.join([str(e) for e in distm[a]]) + "\n")
 
     ends = time.time()
-    print('sport ', (ends-starts))
+    print('+++++++ TIME: sport ', (ends-starts))
 
     #mini = min(min(distm))
     #maxi = max(max(distm))
@@ -455,7 +360,7 @@ def connlevel_sequence(metadata, mapping):
         
 
     endd = time.time()
-    print('time dport ', (endd-startd))
+    print('+++++++ TIME:  dport ', (endd-startd))
     mini = min(min(distm))
     maxi = max(max(distm))
     #print mini
@@ -574,39 +479,36 @@ def connlevel_sequence(metadata, mapping):
 
 
     for n,clus in final_clusters.items():
-        
-        
+
         #print "cluster numbeR: " + str(n)
         for idx,el in  enumerate([inv_mapping[x] for x in clus]):
-            #print(el)
-
-            ip = el.split('->')
-            if '-' in ip[0]:
-                classname = el.split('-')[1]
-            else: 
-                classname = el.split('.pcap')[0]
+            classname = el.split('|')[0]
+            rest = el.split('|')[1]
+            seqid = rest.split(':')[1]
+            rest = rest.split(':')[0]
+            ip = rest.split('->')
             ## TODO: Overriding this FOR NOW!!!
             '''for cdx, cc in enumerate(classes):
                 if cc in el:
                     classname = cc
                     break'''
-            filename = el.split('.pcap')[0]
+            filename = el
             #print(str(n)+","+ip[0]+","+ip[1]+","+str(final_probs[n][idx])+","+str(mapping[el])+"\n")
             outfile.write(str(n)+","+str(mapping[el])+","+str(final_probs[n][idx])+","+str(classname)+","+str(filename)+","+ip[0]+","+ip[1]+"\n")
     outfile.close()
 
     # Making tree
-    print('Producing DAG with relationships between pcaps')
+    print('Producing DAG with relationships between files')
     clusters = {}
     numclus = len(set(clu.labels_))
     with open(csv_file, 'r') as f1:
         reader = csv.reader(f1, delimiter = ',')
         for i,line in enumerate(reader):#f1.readlines()[1:]:
             if i > 0:
+                lab_ip = line[4].split(':')[0]
                 if line[4] not in clusters.keys():
                     clusters[line[4]] = []
-                clusters[line[4]].append((line[3],line[0])) # classname, cluster#
-    #print(clusters)
+                clusters[line[4]].append((lab_ip,line[0])) # classname, cluster#
     f1.close()
     array = [str(x) for x in range(numclus-1)]
     array.append("-1")
@@ -629,7 +531,8 @@ def connlevel_sequence(metadata, mapping):
 
     f2 = open('mas-details'+addition+'.csv', 'w')
     for k,v in treeprep.items():
-        for kv,vv in v.items():
+        v_ = {key: val for key, val in sorted(v.items(), key=lambda item: item[0])}
+        for kv,vv in v_.items():
             #print(k, str(kv), (vv))
             f2.write(str(k)+';'+str(kv)+';'+str(len(vv))+'\n')
     f2.close()
@@ -871,6 +774,82 @@ src_set , dst_set, gap_set, proto_set, bytes_set, events_set, ip_set, dns_set, p
 src_dict , dst_dict, proto_dict, events_dict, dns_dict, port_dict = {}, {}, {}, {}, {}, {}
 bytes, gap_list = [], []
 
+def readnetflow(filename):
+    previousTimestamp = {}
+    connections = {}
+    labels = {}
+    print('reading... ', os.path.basename(filename))
+    f = open(filename, 'r')
+    netflows = f.readlines()
+    first = datetime.datetime.strptime((netflows[1].split(','))[0], '%Y/%m/%d %H:%M:%S.%f')
+    last = datetime.datetime.strptime((netflows[len(netflows) - 1].split(','))[0], '%Y/%m/%d %H:%M:%S.%f')
+    tot_duration = last - first
+    print('TOTAL DURATION ', tot_duration)
+    counter = 0
+    for nid, netflow in enumerate(netflows):  # [:int(len(netflows)/2)]):
+        if nid == 0:
+            continue
+
+        flow = netflow.split(',')
+        try:
+            startTime = flow[0]
+            duration = float(flow[1])
+            proto = flow[2]
+            src_ip = flow[3]
+            sport = int(flow[4], 0) if flow[4] != '' else -1
+            direction = flow[5]
+            dst_ip = flow[6]
+            dport = int(flow[7], 0) if flow[7] != '' else -1
+            totpkts = int(flow[11])
+            totbytes = int(flow[12])
+            avg_bytes = round(totbytes / float(totpkts), 3)
+            label = (flow[14])[5:-1]
+            # Opt1: Mark netflows as malicious
+            if 'botnet' in label.lower():
+                label = 'botnet'
+            elif 'normal' in label.lower():
+                label = 'normal'
+            elif 'background' in label.lower():
+                label = 'background'
+                continue
+            else:
+                label = 'unknown'
+                continue
+        except:
+            print('issue parsing', flow)
+            continue
+        counter += 1
+        timestamp = datetime.datetime.strptime(startTime, '%Y/%m/%d %H:%M:%S.%f')
+
+        key = (src_ip, dst_ip)
+        iat = 0
+        if key in previousTimestamp:
+            iat = (timestamp - previousTimestamp[key]).microseconds / 1000.0
+        else:
+            iat = 0
+        previousTimestamp[key] = timestamp
+        tupple = (iat, totbytes, proto, sport, dport)
+        if key not in connections.keys():
+            connections[key] = []
+        connections[key].append(tupple)
+        
+    print(os.path.basename(filename), " num connections: ", len(connections))
+    
+    values = []
+    todel = []
+    print('Before cleanup: Total packets: ', counter, ' in ', len(connections), ' connections.' )
+    for i,v in connections.items(): # clean it up
+        if len(v) < thresh:
+            todel.append(i)
+ 
+    for item in todel:
+        del connections[item]
+
+    
+    print("Remaining connections after clean up ", len(connections))
+    
+    return (None,connections)
+
 
 def readpcap(filename):
     print("Reading", os.path.basename(filename))
@@ -918,7 +897,7 @@ def readpcap(filename):
                 timestamp = datetime.datetime.utcfromtimestamp(ts)
 
                 if key in previousTimestamp:
-                    gap = (timestamp - previousTimestamp[key]).microseconds / 1000
+                    gap = (timestamp - previousTimestamp[key]).microseconds / 1000 # milliseconds
                 else:
                     gap = 0
 
@@ -963,34 +942,71 @@ def readpcap(filename):
     
     return (gaps,connections)
 
-
+malicious_ips = ['147.32.84.165', '147.32.84.191', '147.32.84.192', '147.32.84.193', '147.32.84.204',
+                     '147.32.84.205', '147.32.84.206', '147.32.84.207', '147.32.84.208', '147.32.84.209']
+benign_ips = ['147.32.84.170', '147.32.84.134', '147.32.84.164', '147.32.87.36', '147.32.80.9', '147.32.87.11']
 def readfolder():
     fno = 0
     meta = {}
     mapping= {}
-    files = glob.glob(sys.argv[2]+"/*.pcap")
-    print('About to read pcap...')
+    files = None
+    pcap = False
+    if 'pcap' in sys.argv[2]:
+        print('Reading pcaps...')
+        files = glob.glob(sys.argv[2]+"/*.pcap")
+        pcap = True
+    elif 'netflow' in sys.argv[2]:
+        print('Reading netflows...')
+        files = glob.glob(sys.argv[2]+"/*.binetflow")
+    else:
+        print('Unknown format...')
+        sys.exit()
+            
+    print('About to read files...')
     for f in files:
+        data, _connections = {}, {}
         key = os.path.basename(f)#[:-5].split('-')
-   
-        data,connections = (readpcap(f))
-        if len(connections.items()) < 1:
+        if pcap:
+            data,_connections = (readpcap(f))
+        else:
+            data, _connections = readnetflow(f)
+            
+        if len(_connections.items()) < 1:
             continue
+        connections = {}
 
-        for i,v in connections.items():
-            name = key+ i[0] + "->" + i[1]
-            print (name)
-            #name = meta[key[len(key)-1]]['threat']+"|" +key[len(key)-1][:5]+"|"+i[0]+"->"+i[1]
-            mapping[name] = fno
-            fno += 1
-            meta[name] = v
+
+        for i,sequences in _connections.items():
+            seq = sequences
+            counter = 0
+            while len(seq) > thresh:
+                part = seq[0:thresh]
+                seq = seq[thresh:]
+                addition = ''
+                if i[0] in malicious_ips:
+                    addition = 'mal'
+                elif i[0] in benign_ips:
+                    addition = 'ben'
+                name = key+'_'+addition + '|' + i[0] + "->" + i[1] + ':' + str(counter)
+                counter += 1
+                mapping[name] = fno
+                fno += 1
+                meta[name] = part
+                connections[name] = part
+            # extra smaller pieces
+            '''
+            if len(seq) > 0:
+                name = i[0] + "->" + i[1] + ':' + str(counter)
+                mapping[name] = fno
+                meta[name] = seq
+                connections[name] = seq'''
 
         print("Average conn length: ", np.mean([len(x) for i,x in connections.items()]))
         print("Minimum conn length: ", np.min([len(x) for i,x in connections.items()]))
         print("Maximum conn length: ", np.max([len(x) for i,x in connections.items()]))
         print ('----------------')
 
-    print('Done reading pcaps...')
+    print('Done reading files...')
     print('Collective surviving connections ', len(meta))
     
 
@@ -999,39 +1015,69 @@ def readfolder():
 def readfile():
     startf = time.time()
     mapping= {}
-    print('About to read pcap...')
-    data, connections = readpcap(sys.argv[2])
-    print('Done reading pcaps...')
-    if len(connections.items()) < 1:
+    data, _connections= {}, {}
+    if 'pcap' in sys.argv[2]:
+        print('About to read pcap...')
+        data, _connections = readpcap(sys.argv[2])
+    elif 'binetflow' in sys.argv[2]:
+        print('About to read netflows...')
+        data, _connections = readnetflow(sys.argv[2])
+    else:
+        print('Unknown format...')
+        sys.exit()
+    print('Done reading file...')
+    if len(_connections.items()) < 1:
         return
 
 
     endf = time.time()
-    print('file reading ', (endf-startf))
+    print('+++++++ TIME: file reading ', (endf-startf))
     fno = 0
     meta = {}
-    nconnections = {}
-    print("Average conn length: ", np.mean([len(x) for i,x in connections.items()]))
-    print("Minimum conn length: ", np.min([len(x) for i,x in connections.items()]))
-    print("Maximum conn length: ", np.max([len(x) for i,x in connections.items()]))
+    connections = {}
+
     #print("num connections survived ", len(connections))
     #print(sum([1 for i,x in connections.items() if len(x)>=50]))
-    for i, v in connections.items():
-        name = i[0] + "->" + i[1]
-        mapping[name] = fno
-        fno += 1
-        meta[name] = v
+
+    for i, sequences in _connections.items():
+        seq = sequences
+        counter = 0
+        while len(seq) > thresh:
+            part = seq[0:thresh]
+            seq = seq[thresh:]
+            addition = ''
+            if i[0] in malicious_ips:
+                addition = 'mal'
+            elif i[0] in benign_ips:
+                addition = 'ben'
+            name = addition + '|' + i[0] + "->" + i[1] + ':' + str(counter)
+            counter +=1
+            mapping[name] = fno
+            fno += 1
+            meta[name] = part
+            connections[name] = part
+        # extra smaller pieces
+        '''
+        if len(seq) > 0:
+            name = i[0] + "->" + i[1] + ':' + str(counter)
+            mapping[name] = fno
+            meta[name] = seq
+            connections[name] = seq'''
 
         '''fig = plt.figure()
         plt.title(''+name)
         plt.plot([x[0] for x in v], 'r')
         plt.plot([x[0] for x in v], 'r.')
         plt.savefig('figs/'+str(mapping[name])+'.png')'''
+
+    print("Average conn length: ", np.mean([len(x) for i, x in connections.items()]))
+    print("Minimum conn length: ", np.min([len(x) for i, x in connections.items()]))
+    print("Maximum conn length: ", np.max([len(x) for i, x in connections.items()]))
     print('Surviving connections ', len(meta))
     startc = time.time()
     connlevel_sequence(meta, mapping)
     endc = time.time()
-    print('Total time ', (endc-startc))
+    print('+++++++ TIME: Total ', (endc-startc))
 
 if sys.argv[1] == 'file':
     readfile()
