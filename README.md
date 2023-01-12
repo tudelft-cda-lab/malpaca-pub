@@ -10,6 +10,12 @@ This repo contains the implementation of MalPaCA (Malware Packet-sequence Cluste
 6. The final diatcne matrix goes as input into HDBScan clustering algorithm
 7. The final clusters are post-processed and printed out as a .csv and in their respective temporal heatmaps.
 
+## Required packages:
+
+`pip install dpkt, statsmodels, cython, dtw-python, fastdtw, hdbscan`
+
+`sudo apt-get install r-base-dev` (If you want to use the `speedup`)
+
 ## Usage (for clustering):
 `python malpaca.py {file|folder} {path/to/file|path/to/folder} {experiment-name} {sequence-length-threshold} {speedup}`
 
@@ -21,11 +27,7 @@ This repo contains the implementation of MalPaCA (Malware Packet-sequence Cluste
 
 `{speedup}` : Boolean depending on whether to use R's parallel DTW library or not
 
-Required packages:
 
-`pip install dpkt, statsmodels, cython, dtw, fastdtw, hdbscan`
-
-`sudo apt-get install r-base-dev` (If you want to use the `speedup`)
 
 ## Usage (for re-clustering):
 `python mal-detection.py {path/to/model.pkl} {file|folder} {path/to/file|path/to/folder} {experiment-name} {sequence-length-threshold}`
